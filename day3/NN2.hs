@@ -93,17 +93,17 @@ trainModel
     -> p                -- ^ updated parameter guess
 trainModel f = foldl' $ \p (x,y) -> p - 0.001 * crossEntropyGrad f x y p
 
-trainModelIO
-    :: (Fractional p, Backprop p, Backprop b, Random p, Floating b)
-    => Model p a b      -- ^ model to train
-    -> [(a,b)]          -- ^ list of observations
-    -> IO p             -- ^ parameter guess
-trainModelIO m xs = do
-    -- Problem with weight generation:
-    -- 1) Should be from Gaussian distribution
-    -- 2) Should be scaled w.r.t. number of inputs (Xavier init)
-    p0 <- (/ 10) . subtract 0.5 <$> randomIO
-    return $ trainModel m p0 xs
+-- trainModelIO
+--     :: (Fractional p, Backprop p, Backprop b, Random p, Floating b)
+--     => Model p a b      -- ^ model to train
+--     -> [(a,b)]          -- ^ list of observations
+--     -> IO p             -- ^ parameter guess
+-- trainModelIO m xs = do
+--     -- Problem with weight generation:
+--     -- 1) Should be from Gaussian distribution
+--     -- 2) Should be scaled w.r.t. number of inputs (Xavier init)
+--     p0 <- (/ 10) . subtract 0.5 <$> randomIO
+--     return $ trainModel m p0 xs
 
 logistic :: Floating a => a -> a
 logistic x = 1 / (1 + exp (-x))
@@ -164,7 +164,18 @@ infixr 8 <~
 
 testTrain3 :: _ -> IO [R 1]
 testTrain3 samps = do
-    trained <- trainModelIO model (take 200000 (cycle samps))
+    w1 <- H.randn :: IO (L 128 2)
+    mb1 <- H.randn :: IO (L 128 1)
+    w2 <- H.randn :: IO (L 1 128)
+    mb2 <- H.randn :: IO (L 1 1)
+    let b1 = H.uncol mb1 :: R 128
+    let b2 = H.uncol mb2 :: R 1
+
+    let p0 = ((w2 :& b2) :& (w1 :& b1))
+
+    let trained = trainModel model p0 (take 200000 (cycle samps))
+    -- trained <- trainModelIO model (take 200000 (cycle samps))
+
     return [ evalBP2 model trained r | (r, _) <- samps ]
 
 model :: Model _ (R 2) (R 1)
