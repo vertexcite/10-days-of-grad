@@ -21,6 +21,14 @@ The (extra) packages involved are:
 *   singletons
 *   split
 
+% stack --install-ghc ghc --resolver lts-11.9 --package backprop-0.2.2.0
+% --package random --package hmatrix-backprop-0.1.2.1 --package statistics
+% --package lens --package one-liner-instances --package split --package
+% ghc-typelits-natnormalise --package ghc-typelits-knownnat --package hmatrix
+% --package hmatrix-vector-sized --package microlens --package vector-sized
+% --package transformers --package type-combinators --package singletons --package
+% MonadRandom --package microlens-th --package mnist-idx -- extensible-neural.lhs
+
 > {-# LANGUAGE BangPatterns        #-}
 > {-# LANGUAGE DataKinds           #-}
 > {-# LANGUAGE DeriveGeneric       #-}
@@ -105,18 +113,33 @@ Types
 
 First, our types:
 
-> data Layer i o =
->     Layer { _lWeights :: !(L o i)
->           , _lBiases  :: !(R o)
->           }
+> class Layer (l :: Nat -> Nat -> Type) where
+>     runLayer
+>         :: forall i o s. (Reifies s W, KnownNat i, KnownNat o)
+>         => BVar s (l i o)
+>         -> BVar s (R i)
+>         -> BVar s (R o)
+
+> data FCLayer i o =
+>     FCLayer { _lWeights :: !(L o i)
+>             , _lBiases :: !(R o)
+>             }
 >   deriving (Show, Generic)
->
-> instance NFData (Layer i o)
-> makeLenses ''Layer
->
+
+Necessary feature: introduce FCLayer' with no biases.
+
+> instance NFData (FCLayer i o)
+> makeLenses ''FCLayer
+
+> instance Layer FCLayer where
+>   runLayer l x = (l ^^. lWeights) #>! x + (l ^^. lBiases)
+>   {-# INLINE runLayer #-}
+
+TODO: How this can be generalized to Layer instead of FCLayer?
+
 > data Net :: Nat -> [Nat] -> Nat -> Type where
->     NO   :: !(Layer i o) -> Net i '[] o
->     (:~) :: !(Layer i h) -> !(Net h hs o) -> Net i (h ': hs) o
+>     NO   :: !(FCLayer i o) -> Net i '[] o
+>     (:~) :: !(FCLayer i h) -> !(Net h hs o) -> Net i (h ': hs) o
 
 Unfortunately, we can't automatically generate lenses for GADTs, so we have
 to make them by hand.[^poly]
@@ -125,11 +148,11 @@ to make them by hand.[^poly]
 with type safety via paraemtric polymorphism.
 
 > _NO :: Lens (Net i '[] o) (Net i' '[] o')
->             (Layer i o  ) (Layer i' o'  )
+>             (FCLayer i o  ) (FCLayer i' o'  )
 > _NO f (NO l) = NO <$> f l
 >
 > _NIL :: Lens (Net i (h ': hs) o) (Net i' (h ': hs) o)
->              (Layer i h        ) (Layer i' h        )
+>              (FCLayer i h        ) (FCLayer i' h        )
 > _NIL f (l :~ n) = (:~ n) <$> f l
 >
 > _NIN :: Lens (Net i (h ': hs) o) (Net i (h ': hs') o')
@@ -139,7 +162,7 @@ with type safety via paraemtric polymorphism.
 You can read `_NO` as:
 
 ```haskell
-_NO :: Lens' (Net i '[] o) (Layer i o)
+_NO :: Lens' (Net i '[] o) (FCLayer i o)
 ```
 
 A lens into a single-layer network, and
@@ -159,17 +182,7 @@ nondeterminism.
 Running the network
 ===================
 
-Here's the meat of process, then: specifying how to run the network.  We
-re-use our `BVar`-based combinators defined in the last write-up:
-
-> runLayer
->     :: (KnownNat i, KnownNat o, Reifies s W)
->     => BVar s (Layer i o)
->     -> BVar s (R i)
->     -> BVar s (R o)
-> runLayer l x = (l ^^. lWeights) #>! x + (l ^^. lBiases)
-> {-# INLINE runLayer #-}
-
+Here's the meat of process.
 For `runNetwork`, we pattern match on `hs` using singletons, so we always
 know exactly what type of network we have:
 
@@ -402,7 +415,9 @@ HMatrix Operations
 Instances
 ---------
 
-> instance (KnownNat i, KnownNat o) => Num (Layer i o) where
+% Can the same instances be defined for the general Layer class?
+
+> instance (KnownNat i, KnownNat o) => Num (FCLayer i o) where
 >     (+)         = gPlus
 >     (-)         = gMinus
 >     (*)         = gTimes
@@ -411,17 +426,17 @@ Instances
 >     signum      = gSignum
 >     fromInteger = gFromInteger
 >
-> instance (KnownNat i, KnownNat o) => Fractional (Layer i o) where
+> instance (KnownNat i, KnownNat o) => Fractional (FCLayer i o) where
 >     (/)          = gDivide
 >     recip        = gRecip
 >     fromRational = gFromRational
 >
-> instance (KnownNat i, KnownNat o) => Backprop (Layer i o)
+> instance (KnownNat i, KnownNat o) => Backprop (FCLayer i o)
 >
 >
 > liftNet0
 >     :: forall i hs o. (KnownNat i, KnownNat o)
->     => (forall m n. (KnownNat m, KnownNat n) => Layer m n)
+>     => (forall m n. (KnownNat m, KnownNat n) => FCLayer m n)
 >     -> Sing hs
 >     -> Net i hs o
 > liftNet0 x = go
@@ -434,8 +449,8 @@ Instances
 > liftNet1
 >     :: forall i hs o. (KnownNat i, KnownNat o)
 >     => (forall m n. (KnownNat m, KnownNat n)
->           => Layer m n
->           -> Layer m n
+>           => FCLayer m n
+>           -> FCLayer m n
 >        )
 >     -> Sing hs
 >     -> Net i hs o
@@ -455,9 +470,9 @@ Instances
 > liftNet2
 >     :: forall i hs o. (KnownNat i, KnownNat o)
 >     => (forall m n. (KnownNat m, KnownNat n)
->           => Layer m n
->           -> Layer m n
->           -> Layer m n
+>           => FCLayer m n
+>           -> FCLayer m n
+>           -> FCLayer m n
 >        )
 >     -> Sing hs
 >     -> Net i hs o
@@ -513,8 +528,8 @@ Instances
 >     uniform g = uniformSample <$> MWC.uniform g <*> pure 0 <*> pure 1
 >     uniformR (l, h) g = (\x -> x * (h - l) + l) <$> MWC.uniform g
 >
-> instance (KnownNat i, KnownNat o) => MWC.Variate (Layer i o) where
->     uniform g = Layer <$> MWC.uniform g <*> MWC.uniform g
+> instance (KnownNat i, KnownNat o) => MWC.Variate (FCLayer i o) where
+>     uniform g = FCLayer <$> MWC.uniform g <*> MWC.uniform g
 >     uniformR (l, h) g = (\x -> x * (h - l) + l) <$> MWC.uniform g
 >
 > instance ( KnownNat i
