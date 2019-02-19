@@ -9,8 +9,7 @@
 {-# OPTIONS_GHC -fno-warn-orphans                 #-}
 {-# OPTIONS_GHC -fno-warn-partial-type-signatures #-}
 
-import           Backprop.Learn
-import           Backprop.Learn.Model.Function ( meanModel )
+import           Model ( batchMean, batchVar )
 import           Numeric.Backprop as BP
 import           Control.DeepSeq
 import           Control.Exception
@@ -27,6 +26,7 @@ import           Data.Primitive.MutVar
 import           Data.Time
 import           Data.Traversable
 import           Data.Tuple
+import           GHC.TypeNats
 import           Numeric.LinearAlgebra.Static.Backprop
 import           Numeric.Opto
 import           System.Environment
@@ -42,13 +42,13 @@ a0 = H.fromList [1,2] :: H.R 2
 v0 = H.fromList [3,10] :: H.R 2
 
 runBatchNorm
-  :: (Floating a, Backprop a, Reifies s W)
-  => BVar s [a] -> BVar s [a]
+  :: (Reifies s W, KnownNat i)
+  => BVar s [R i] -> BVar s [R i]
 runBatchNorm batch = collectVar $ f (sequenceVar batch)
   where
     f = map (\v -> (v - mu) / sqrt (var + epsilon))
-    mu = meanModel batch
-    var = varModel batch
+    mu = batchMean batch
+    var = batchVar batch
     epsilon = 1e-12
 
 batch :: [H.R 2]
