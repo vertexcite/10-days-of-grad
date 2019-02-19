@@ -143,12 +143,12 @@ runNetwork1 n =
              . linearLayer (n ^^. nLayer3)
 
              -- Layer #2
-             . withLayer sigmoid
+             . withLayer tanh
              . batchNormLayer
              . linearLayer (n ^^. nLayer2)
 
              -- Layer #1
-             . withLayer sigmoid
+             . withLayer tanh
              . batchNormLayer
              . linearLayer (n ^^. nLayer1)
 
@@ -167,11 +167,11 @@ runNetwork0 n =
              . linearLayer (n ^^. nLayer3)
 
              -- Layer #2
-             . withLayer sigmoid
+             . withLayer tanh
              . linearLayer (n ^^. nLayer2)
 
              -- Layer #1
-             . withLayer sigmoid
+             . withLayer tanh
              . linearLayer (n ^^. nLayer1)
 
              . inputs
@@ -286,7 +286,7 @@ main = MWC.withSystemRandom $ \g -> do
     Just test  <- loadMNIST "data/t10k-images-idx3-ubyte"  "data/t10k-labels-idx1-ubyte"
     putStrLn "Loaded data."
     net0 <- MWC.uniformR @(Network 784 300 100 10) (-0.5, 0.5) g
-    flip evalStateT net0 . forM_ [1..] $ \e -> do
+    flip evalStateT net0 . forM_ [1..100] $ \e -> do
       train' <- liftIO . fmap V.toList $ MWC.uniformShuffle (V.fromList train) g
       liftIO $ printf "[Epoch %d]\n" (e :: Int)
 
