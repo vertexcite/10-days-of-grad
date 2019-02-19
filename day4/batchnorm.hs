@@ -54,26 +54,6 @@ import qualified System.Random.MWC.Distributions       as MWC
 
 import           Model ( batchMean, batchVar )
 
-a0 = H.fromList [1,2] :: H.R 2
-v0 = H.fromList [3,10] :: H.R 2
-
-runBatchNorm
-  :: (Reifies s W, KnownNat i)
-  => BVar s [R i] -> BVar s [R i]
-runBatchNorm batch = collectVar $ f (sequenceVar batch)
-  where
-    f = map (\v -> (v - mu) / sqrt (var + epsilon))
-    mu = batchMean batch
-    var = batchVar batch
-    epsilon = 1e-12
-
-batch0 :: [H.R 2]
-batch0 = [a0, v0]
-
-testBatchnorm = do
-  let res = evalBP runBatchNorm batch0
-  mapM_ (print. H.extract) res
-
 data Layer i o =
     Layer { _lWeights :: !(L o i)
           , _lBiases  :: !(R o)
@@ -94,6 +74,106 @@ data Network i h1 h2 o =
 
 instance NFData (Network i h1 h2 o)
 makeLenses ''Network
+
+runLayer
+    :: (KnownNat i, KnownNat o, Reifies s W)
+    => BVar s (Layer i o)  -- ^ Weights
+    -> BVar s [R i]        -- ^ Input batch
+    -> BVar s [R o]        -- ^ Output batch
+runLayer l = withLayer f
+  where
+    f = (\x -> (l ^^. lWeights) #> x + (l ^^. lBiases))
+{-# INLINE runLayer #-}
+
+runBatchNorm
+  :: (Reifies s W, KnownNat i)
+  => BVar s [R i] -> BVar s [R i]
+runBatchNorm batch = withLayer f batch
+  where
+    f v = (v - mu) / sqrt (var + epsilon)
+    mu = batchMean batch
+    var = batchVar batch
+    epsilon = 1e-12
+{-# INLINE runBatchNorm #-}
+
+testBatchnorm = do
+  let a0 = H.fromList [1,10] :: H.R 2
+      v0 = H.fromList [3,2] :: H.R 2
+      batch0 :: [H.R 2]
+      batch0 = [a0, v0]
+
+  let res = evalBP runBatchNorm batch0
+  mapM_ (print. H.extract) res
+  -- [-1, 1]
+  -- [1, -1]
+
+sigmoid :: Floating a => a -> a
+sigmoid x = 1 / (1 + exp (-x))
+{-# INLINE sigmoid #-}
+
+softMax :: (KnownNat n, Reifies s W) => BVar s (R n) -> BVar s (R n)
+softMax x = konst (1 / sumElements expx) * expx
+  where
+    expx = exp x
+{-# INLINE softMax #-}
+
+withLayer
+  :: (Reifies s W, KnownNat i, KnownNat o)
+  => (BVar s (R i) -> BVar s (R o))
+  -> BVar s [R i] -> BVar s [R o]
+withLayer f = collectVar. map f. sequenceVar
+
+inputs :: (KnownNat i, Reifies s W)
+       => [R i]
+       -> BVar s [R i]
+inputs = collectVar. map constVar
+
+-- Run network over batches of data
+runNetwork
+    :: (KnownNat i, KnownNat h1, KnownNat h2, KnownNat o, Reifies s W)
+    => BVar s (Network i h1 h2 o)
+    -> [R i]
+    -> BVar s [R o]
+runNetwork n =
+             -- Layer #3
+             withLayer softMax
+             . runBatchNorm
+             . runLayer (n ^^. nLayer3)
+
+             -- Layer #2
+             . withLayer sigmoid
+             . runBatchNorm
+             . runLayer (n ^^. nLayer2)
+
+             -- Layer #1
+             . withLayer sigmoid
+             . runBatchNorm
+             . runLayer (n ^^. nLayer1)
+
+             . inputs
+{-# INLINE runNetwork #-}
+
+-- | No batch normalization
+runNetwork0
+    :: (KnownNat i, KnownNat h1, KnownNat h2, KnownNat o, Reifies s W)
+    => BVar s (Network i h1 h2 o)
+    -> [R i]
+    -> BVar s [R o]
+runNetwork0 n =
+             -- Layer #3
+             withLayer softMax
+             . runLayer (n ^^. nLayer3)
+
+             -- Layer #2
+             . withLayer sigmoid
+             . runLayer (n ^^. nLayer2)
+
+             -- Layer #1
+             . withLayer sigmoid
+             . runLayer (n ^^. nLayer1)
+
+             . inputs
+{-# INLINE runNetwork0 #-}
 
 instance (KnownNat i, KnownNat o) => Num (Layer i o) where
     (+)         = gPlus
@@ -134,38 +214,6 @@ instance ( KnownNat i
 instance (KnownNat i, KnownNat o) => Backprop (Layer i o)
 instance (KnownNat i, KnownNat h1, KnownNat h2, KnownNat o) => Backprop (Network i h1 h2 o)
 
-runLayer
-    :: (KnownNat i, KnownNat o, Reifies s W)
-    => BVar s (Layer i o)
-    -> BVar s (R i)
-    -> BVar s (R o)
-runLayer l x = (l ^^. lWeights) #> x + (l ^^. lBiases)
-{-# INLINE runLayer #-}
-
-softMax :: (KnownNat n, Reifies s W) => BVar s (R n) -> BVar s (R n)
-softMax x = konst (1 / sumElements expx) * expx
-  where
-    expx = exp x
-{-# INLINE softMax #-}
-
-sigmoid :: Floating a => a -> a
-sigmoid x = 1 / (1 + exp (-x))
-{-# INLINE sigmoid #-}
-
-runNetwork
-    :: (KnownNat i, KnownNat h1, KnownNat h2, KnownNat o, Reifies s W)
-    => BVar s (Network i h1 h2 o)
-    -> R i
-    -> BVar s (R o)
-runNetwork n = softMax
-             . runLayer (n ^^. nLayer3)
-             . sigmoid
-             . runLayer (n ^^. nLayer2)
-             . sigmoid
-             . runLayer (n ^^. nLayer1)
-             . constVar
-{-# INLINE runNetwork #-}
-
 crossEntropy
     :: (KnownNat n, Reifies s W)
     => R n
@@ -176,46 +224,52 @@ crossEntropy targ res = -(log res BP.<.> constVar targ)
 
 netErr
     :: (KnownNat i, KnownNat h1, KnownNat h2, KnownNat o, Reifies s W)
-    => R i
-    -> R o
+    => [R i]
+    -> [R o]
     -> BVar s (Network i h1 h2 o)
     -> BVar s Double
-netErr x targ n = crossEntropy targ (runNetwork n x)
+netErr xs targ n = sum $ zipWith crossEntropy targ $ sequenceVar (runNetwork n xs)
 {-# INLINE netErr #-}
 
 trainStep
     :: forall i h1 h2 o. (KnownNat i, KnownNat h1, KnownNat h2, KnownNat o)
     => Double             -- ^ learning rate
-    -> R i                -- ^ input
-    -> R o                -- ^ target
+    -> [R i]                -- ^ input batch
+    -> [R o]                -- ^ targets
     -> Network i h1 h2 o  -- ^ initial network
     -> Network i h1 h2 o
 trainStep r !x !targ !n = n - realToFrac r * gradBP (netErr x targ) n
 {-# INLINE trainStep #-}
 
-trainList
+trainBatch
     :: (KnownNat i, KnownNat h1, KnownNat h2, KnownNat o)
     => Double             -- ^ learning rate
     -> [(R i, R o)]       -- ^ input and target pairs
     -> Network i h1 h2 o  -- ^ initial network
     -> Network i h1 h2 o
-trainList r = flip $ foldl' (\n (x,y) -> trainStep r x y n)
-{-# INLINE trainList #-}
+trainBatch r dta n =
+  let (xs, tgt) = unzip dta
+  in trainStep r xs tgt n
+{-# INLINE trainBatch #-}
 
+-- | Test network on a batch of samples
 testNet
     :: forall i h1 h2 o. (KnownNat i, KnownNat h1, KnownNat h2, KnownNat o)
     => [(R i, R o)]
     -> Network i h1 h2 o
     -> Double
-testNet xs n = sum (map (uncurry test) xs) / fromIntegral (length xs)
+testNet xs n = sum (zipWith test rs tgt) / fromIntegral (length rs)
   where
-    test :: R i -> R o -> Double          -- test if the max index is correct
-    test x (H.extract->t)
+    dta = map fst xs
+    tgt = map snd xs
+
+    rs :: [R o]
+    rs = evalBP (`runNetwork` dta) n
+
+    test :: R o -> R o -> Double          -- test if the max index is correct
+    test r (H.extract->t)
         | HM.maxIndex t == HM.maxIndex (H.extract r) = 1
-        | otherwise                                = 0
-      where
-        r :: R o
-        r = evalBP (`runNetwork` x) n
+        | otherwise = 0
 
 main :: IO ()
 main = MWC.withSystemRandom $ \g -> do
@@ -227,13 +281,13 @@ main = MWC.withSystemRandom $ \g -> do
       train' <- liftIO . fmap V.toList $ MWC.uniformShuffle (V.fromList train) g
       liftIO $ printf "[Epoch %d]\n" (e :: Int)
 
-      forM_ ([1..] `zip` chunksOf batch train') $ \(b, chnk) -> StateT $ \n0 -> do
+      forM_ ([1..] `zip` chunksOf batchSize train') $ \(b, chnk) -> StateT $ \n0 -> do
         printf "(Batch %d)\n" (b :: Int)
 
         t0 <- getCurrentTime
-        n' <- evaluate . force $ trainList rate chnk n0
+        n' <- evaluate . force $ trainBatch rate chnk n0
         t1 <- getCurrentTime
-        printf "Trained on %d points in %s.\n" batch (show (t1 `diffUTCTime` t0))
+        printf "Trained on %d points in %s.\n" batchSize (show (t1 `diffUTCTime` t0))
 
         let trainScore = testNet chnk n'
             testScore  = testNet test n'
@@ -243,7 +297,7 @@ main = MWC.withSystemRandom $ \g -> do
         return ((), n')
   where
     rate  = 0.02
-    batch = 5000
+    batchSize = 5000
 
 loadMNIST
     :: FilePath
