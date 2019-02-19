@@ -96,7 +96,7 @@ batchNormLayer batch = withLayer f batch
     epsilon = 1e-12
 {-# INLINE batchNormLayer #-}
 
--- TODO batchNormAffineLayer
+-- TODO batchNormAffineLayer with trainable beta and gamma + running_mean/var
 
 testBatchnorm = do
   let a0 = H.fromList [1,10] :: H.R 2
