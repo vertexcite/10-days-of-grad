@@ -96,6 +96,8 @@ batchNormLayer batch = withLayer f batch
     epsilon = 1e-12
 {-# INLINE batchNormLayer #-}
 
+-- TODO batchNormAffineLayer
+
 testBatchnorm = do
   let a0 = H.fromList [1,10] :: H.R 2
       v0 = H.fromList [3,2] :: H.R 2
@@ -304,7 +306,7 @@ main = MWC.withSystemRandom $ \g -> do
         return ((), n')
   where
     rate  = 0.02
-    batchSize = 5000
+    batchSize = 512
 
 loadMNIST
     :: FilePath
