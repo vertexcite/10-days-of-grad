@@ -75,26 +75,26 @@ data Network i h1 h2 o =
 instance NFData (Network i h1 h2 o)
 makeLenses ''Network
 
-runLayer
+linearLayer
     :: (KnownNat i, KnownNat o, Reifies s W)
     => BVar s (Layer i o)  -- ^ Weights
     -> BVar s [R i]        -- ^ Input batch
     -> BVar s [R o]        -- ^ Output batch
-runLayer l = withLayer f
+linearLayer l = withLayer f
   where
     f = (\x -> (l ^^. lWeights) #> x + (l ^^. lBiases))
-{-# INLINE runLayer #-}
+{-# INLINE linearLayer #-}
 
-runBatchNorm
+batchNormLayer
   :: (Reifies s W, KnownNat i)
   => BVar s [R i] -> BVar s [R i]
-runBatchNorm batch = withLayer f batch
+batchNormLayer batch = withLayer f batch
   where
     f v = (v - mu) / sqrt (var + epsilon)
     mu = batchMean batch
     var = batchVar batch
     epsilon = 1e-12
-{-# INLINE runBatchNorm #-}
+{-# INLINE batchNormLayer #-}
 
 testBatchnorm = do
   let a0 = H.fromList [1,10] :: H.R 2
@@ -102,7 +102,7 @@ testBatchnorm = do
       batch0 :: [H.R 2]
       batch0 = [a0, v0]
 
-  let res = evalBP runBatchNorm batch0
+  let res = evalBP batchNormLayer batch0
   mapM_ (print. H.extract) res
   -- [-1, 1]
   -- [1, -1]
@@ -129,29 +129,29 @@ inputs :: (KnownNat i, Reifies s W)
 inputs = collectVar. map constVar
 
 -- Run network over batches of data
-runNetwork
+runNetwork1
     :: (KnownNat i, KnownNat h1, KnownNat h2, KnownNat o, Reifies s W)
     => BVar s (Network i h1 h2 o)
     -> [R i]
     -> BVar s [R o]
-runNetwork n =
+runNetwork1 n =
              -- Layer #3
              withLayer softMax
-             . runBatchNorm
-             . runLayer (n ^^. nLayer3)
+             . batchNormLayer
+             . linearLayer (n ^^. nLayer3)
 
              -- Layer #2
              . withLayer sigmoid
-             . runBatchNorm
-             . runLayer (n ^^. nLayer2)
+             . batchNormLayer
+             . linearLayer (n ^^. nLayer2)
 
              -- Layer #1
              . withLayer sigmoid
-             . runBatchNorm
-             . runLayer (n ^^. nLayer1)
+             . batchNormLayer
+             . linearLayer (n ^^. nLayer1)
 
              . inputs
-{-# INLINE runNetwork #-}
+{-# INLINE runNetwork1 #-}
 
 -- | No batch normalization
 runNetwork0
@@ -162,18 +162,25 @@ runNetwork0
 runNetwork0 n =
              -- Layer #3
              withLayer softMax
-             . runLayer (n ^^. nLayer3)
+             . linearLayer (n ^^. nLayer3)
 
              -- Layer #2
              . withLayer sigmoid
-             . runLayer (n ^^. nLayer2)
+             . linearLayer (n ^^. nLayer2)
 
              -- Layer #1
              . withLayer sigmoid
-             . runLayer (n ^^. nLayer1)
+             . linearLayer (n ^^. nLayer1)
 
              . inputs
 {-# INLINE runNetwork0 #-}
+
+runNetwork
+    :: (KnownNat i, KnownNat h1, KnownNat h2, KnownNat o, Reifies s W)
+    => BVar s (Network i h1 h2 o)
+    -> [R i]
+    -> BVar s [R o]
+runNetwork = runNetwork1
 
 instance (KnownNat i, KnownNat o) => Num (Layer i o) where
     (+)         = gPlus
