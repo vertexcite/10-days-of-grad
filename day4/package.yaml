@@ -64,6 +64,12 @@ executables:
     - filepath
     - mnist-idx
     - time
+
+    - hmatrix
+    - mnist-idx
+    - mwc-random
+    - one-liner-instances
+    - split
   NN2:
     main: NN2.hs
     dependencies:
