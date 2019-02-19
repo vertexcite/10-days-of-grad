@@ -306,7 +306,7 @@ main = MWC.withSystemRandom $ \g -> do
         return ((), n')
   where
     rate  = 0.02
-    batchSize = 512
+    batchSize = 1024
 
 loadMNIST
     :: FilePath
