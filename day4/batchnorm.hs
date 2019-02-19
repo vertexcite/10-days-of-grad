@@ -85,6 +85,18 @@ linearLayer l = withLayer f
     f = (\x -> (l ^^. lWeights) #> x + (l ^^. lBiases))
 {-# INLINE linearLayer #-}
 
+batchNormAffineLayer
+  :: (Reifies s W, KnownNat i)
+  => BVar s [R i] -> BVar s [R i] -> BVar s [R i]
+batchNormAffineLayer par batch = withLayer f batch
+  where
+    [beta, gamma] = sequenceVar par
+    f v = gamma * ((v - mu) / sqrt (var + epsilon)) + beta
+    mu = batchMean batch
+    var = batchVar batch
+    epsilon = 1e-12
+{-# INLINE batchNormLayer #-}
+
 batchNormLayer
   :: (Reifies s W, KnownNat i)
   => BVar s [R i] -> BVar s [R i]
