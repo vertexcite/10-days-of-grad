@@ -53,6 +53,7 @@ import qualified Prelude.Backprop                      as B
 import qualified Numeric.LinearAlgebra as LA
 
 
+{-
 data a :& b = !a :& !b
   deriving (Show, Generic)
 infixr 2 :&
@@ -244,3 +245,7 @@ instance (KnownNat n) => Random (R n) where
     random = runState $ vecR <$> SVS.replicateM (state random)
     randomR (xs,ys) = runState . fmap vecR $ SVS.zipWithM (curry (state . randomR))
         (rVec xs) (rVec ys)
+
+-}
+
+main = return ()

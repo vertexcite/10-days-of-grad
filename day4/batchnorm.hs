@@ -67,11 +67,11 @@ runBatchNorm batch = collectVar $ f (sequenceVar batch)
     var = batchVar batch
     epsilon = 1e-12
 
-batch :: [H.R 2]
-batch = [a0, v0]
+batch0 :: [H.R 2]
+batch0 = [a0, v0]
 
 testBatchnorm = do
-  let res = evalBP runBatchNorm batch
+  let res = evalBP runBatchNorm batch0
   mapM_ (print. H.extract) res
 
 data Layer i o =
