@@ -95,7 +95,7 @@ batchNormAffineLayer par batch = withLayer f batch
     mu = batchMean batch
     var = batchVar batch
     epsilon = 1e-12
-{-# INLINE batchNormLayer #-}
+{-# INLINE batchNormAffineLayer #-}
 
 batchNormLayer
   :: (Reifies s W, KnownNat i)
