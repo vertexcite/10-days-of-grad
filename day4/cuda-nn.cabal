@@ -1,0 +1,78 @@
+name:                   cuda-nn
+version:                0.0.0
+synopsis:               Neural networks GPU demo
+description:
+  1. Manual backpropagation
+  2. Automatic differentiation
+
+author:                 Bogdan Penkovsky
+maintainer:
+category:               AI
+build-type:             Simple
+extra-source-files:     README.md
+cabal-version:          >=1.10
+
+Flag llvm-cpu
+  Description:          Enable the LLVM backend for multicore CPUs
+  Default:              True
+
+Flag llvm-ptx
+  Description:          Enable the LLVM PTX backend for NVIDIA GPUs
+  Default:              True
+
+library
+  default-language:     Haskell2010
+  exposed-modules:
+    NeuralNetwork
+
+  -- other-modules:
+
+  build-depends:
+        base                            >= 4.7 && < 4.13
+      , accelerate                      >= 1.0 && < 1.4
+      , accelerate-blas
+
+  hs-source-dirs:
+      src
+
+  ghc-options:
+      -O2
+      -Wall
+
+  if flag(llvm-cpu)
+    CPP-options:        -DACCELERATE_LLVM_NATIVE_BACKEND
+    build-depends:
+        accelerate-llvm                 >= 1.3 && < 1.4
+      , accelerate-llvm-native          >= 1.3 && < 1.4
+      , blas-hs                         >= 0.1
+      , llvm-hs-pure                    >= 4.1 && < 7.1
+
+  if flag(llvm-ptx)
+    CPP-options:        -DACCELERATE_LLVM_PTX_BACKEND
+    build-depends:
+        accelerate-llvm                 >= 1.3 && < 1.4
+      , accelerate-llvm-ptx             >= 1.3 && < 1.4
+      , bytestring                      >= 0.9
+      , containers                      >= 0.5
+      , cublas                          >= 0.3
+      , cuda                            >= 0.8
+      , file-embed                      >= 0.0.10
+      , llvm-hs-pure                    >= 4.1 && < 7.1
+      , mtl                             >= 2.2
+      , mwc-random-accelerate
+
+executable main-exe
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  ghc-options:         -Wall -threaded
+  default-language:    Haskell2010
+  build-depends:
+        base                    >= 4.7  && < 4.13
+      , bytestring
+      , accelerate              >= 1.2
+      , accelerate-blas
+      , accelerate-llvm-native
+      , accelerate-llvm-ptx
+      , mwc-random-accelerate
+      , cuda-nn
+
