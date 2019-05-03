@@ -15,7 +15,13 @@
 2. Install CUDA
 3. Install LLVM
 
+    Ubuntu 18.04:
+
     $ sudo apt install llvm-6.0-dev
+
+    Arch Linux:
+
+    $ sudo pacman -S llvm7
 
 4. Export LLVM/CUDA paths
 

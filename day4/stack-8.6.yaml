@@ -1,0 +1,22 @@
+resolver: lts-13.5
+
+packages:
+- .
+
+extra-deps:
+- git:    https://github.com/tmcdonell/accelerate.git
+  commit: d948d737683bc2f340b56319a4412505274502fc
+
+- git:    https://github.com/tmcdonell/accelerate-llvm.git
+  commit: a7a5c89a35f766dd14f6f2a982ea165bed0fcac1
+  subdirs:
+    - accelerate-llvm
+    - accelerate-llvm-native
+    - accelerate-llvm-ptx
+
+- git:    https://github.com/tmcdonell/accelerate-blas.git
+  commit: 1b6c4c363e8f3511049315e27a70bf8e0d7f09eb
+
+- llvm-hs-pure-7.0.0
+- llvm-hs-7.0.1
+- mwc-random-accelerate-0.1.0.0
