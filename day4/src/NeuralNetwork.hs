@@ -15,7 +15,6 @@ module NeuralNetwork
   , sigmoid
   , sigmoid'
   , genWeights
-  -- , genNetwork
   , forward
 
   -- * Training
@@ -42,11 +41,11 @@ module NeuralNetwork
 
 import           Control.Monad ( replicateM, foldM )
 import           Control.Applicative ( liftA2 )
-import           Data.List ( intersperse )
 import qualified System.Random as R
 import           System.Random.MWC ( createSystemRandom )
 import           System.Random.MWC.Distributions ( standard )
-
+import           Data.List ( maximumBy )
+import           Data.Ord
 import           Data.Massiv.Array hiding ( map, zip, zipWith )
 import qualified Data.Massiv.Array as A
 import           Streamly
@@ -64,15 +63,19 @@ data FActivation = Relu | Sigmoid | Id
 
 -- Neural network layers: Linear, Batchnorm, Activation
 data Layer a = Linear (Matrix a) (Vector a)
-             -- Batchnorm with running mean, variance, and two
-             -- learnable affine parameters
-             | Batchnorm1d (Vector a) (Vector a) (Vector a) (Vector a)
-             | Activation FActivation
+               -- Same as Linear, but without biases
+               | Linear' (Matrix a)
+               -- Batchnorm with running mean, variance, and two
+               -- learnable affine parameters
+               | Batchnorm1d (Vector a) (Vector a) (Vector a) (Vector a)
+               | Activation FActivation
 
 type NeuralNetwork a = [Layer a]
 
 data Gradients a = -- Weight and bias gradients
                    LinearGradients (Matrix a) (Vector a)
+                   -- Weight gradients
+                   | Linear'Gradients (Matrix a)
                    -- Batchnorm parameters and gradients
                    | BN1 (Vector a) (Vector a) (Vector a) (Vector a)
                    | NoGrad  -- No learnable parameters
@@ -129,9 +132,9 @@ relu' x = compute. A.zipWith f x
 randomishArray
   :: (Mutable r ix e, R.RandomGen a, R.Random e) =>
      (e, e) -> a -> Sz ix -> Array r ix e
-randomishArray rng g0 sz = compute $ unfoldlS_ Seq sz rand g0
+randomishArray rng g0 sz = compute $ unfoldlS_ Seq sz _rand g0
   where
-    rand g =
+    _rand g =
       let (a, g') = R.randomR rng g
       in (g', a)
 
@@ -224,17 +227,18 @@ pass phase net (x, tgt) = (pred, grads)
     -- 3) Gradients of learnable parameters (where applicable)
     _pass inp [] = (loss', pred, [])
       where
-        -- TODO: remove this sigmoid. Make it a part of SGD/Adam
-        pred = sigmoid inp
+        -- TODO: remove this softmax. Make it a part of SGD/Adam
+        -- pred = softmax inp
+        pred = inp
+
         -- Gradient of cross-entropy loss
-        -- after sigmoid activation.
+        -- after softmax activation.
         loss' = compute $ pred .- tgt
 
     _pass inp (Linear w b:layers) = (dX, pred, LinearGradients dW dB:t)
       where
         -- Forward
-        bBroadcasted = expandWithin Dim2 (rows inp) const b
-        lin = compute $ (inp |*| w) .+ bBroadcasted
+        lin = compute $ (inp |*| w) .+ (b `rowsLike` inp)
 
         (dZ, pred, t) = _pass lin layers
 
@@ -243,10 +247,22 @@ pass phase net (x, tgt) = (pred, grads)
         dB = bias' dZ
         dX = linearX' w dZ
 
+    _pass inp (Linear' w:layers) = (dX, pred, Linear'Gradients dW:t)
+      where
+        -- Forward
+        lin = compute $ (inp |*| w)
+
+        (dZ, pred, t) = _pass lin layers
+
+        -- Backward
+        dW = linearW' inp dZ
+        dX = linearX' w dZ
+
     -- See also https://kratzert.github.io/2016/02/12/understanding-the-gradient-flow-through-the-batch-normalization-layer.html
     _pass inp (Batchnorm1d mu variance gamma beta:layers) = (dX, pred, BN1 batchMu batchVariance dGamma dBeta:t)
       where
-        eps = 1e-5
+        -- Forward
+        eps = 1e-12
         b = br (rows inp)  -- Broadcast (replicate) rows from 1 to batch size
         m = recip $ (fromIntegral $ rows inp)
 
@@ -286,13 +302,12 @@ pass phase net (x, tgt) = (pred, grads)
         out0 :: Matrix Float
         out0 = compute $ gammax .+ b beta
 
-        -- Forward
         out :: Matrix Float
         out = if phase == Train
                 -- Forward (Train phase)
                 then out0
                 -- Forward (Eval phase)
-                else compute $ (inp .- b mu) ./ (b $ compute $ sqrtB $ variance `addC` eps)
+                else out2
 
         (dZ, pred, t) = _pass out layers
 
@@ -330,6 +345,12 @@ pass phase net (x, tgt) = (pred, grads)
         dx2 = b $ compute (m `_scale` dmu)
 
         dX = compute $ dx1 .+ dx2
+
+        -- Alternatively use running stats during Eval phase:
+        out1 :: Matrix Float
+        out1 = compute $ (inp .- b mu) ./ (b $ compute $ sqrtB $ variance `addC` eps)
+
+        out2 = compute $ (b gamma .* out1) .+ b beta
 
     _pass inp (Activation symbol:layers) = (dY, pred, NoGrad:t)
       where
@@ -377,6 +398,9 @@ sgd lr n net0 dataStream = iterN n epochStep net0
     f (Linear w b) (LinearGradients dW dB) =
       Linear (compute $ w .- lr `_scale` dW) (compute $ b .- lr `_scale` dB)
 
+    f (Linear' w) (Linear'Gradients dW) =
+      Linear' (compute $ w .- lr `_scale` dW)
+
     -- Update batchnorm parameters
     f (Batchnorm1d mu v gamma beta) (BN1 mu' v' dGamma dBeta) = (Batchnorm1d mu'' v'' gamma' beta')
       where
@@ -409,29 +433,19 @@ genWeights (nin, nout) = do
   b <- setComp Par <$> _genBiases nout
   return (w, b)
     where
-      _genWeights (nin, nout) = scale k <$> randn sz
+      _genWeights (nin', nout') = scale k <$> randn sz
         where
-          sz = Sz (nin :. nout)
-          k = sqrt (1.0 / fromIntegral nin)
+          sz = Sz (nin' :. nout')
+          k = 0.01
 
       _genBiases n = randn (Sz n)
 
--- | Generate a neural network of fully-connected layers with random weights
--- TODO:
--- correct-by-construction network like
+-- TODO: correct-by-construction
 -- net <- genNetwork $ Sequential (I 2
 --                                 :> Linear 128
 --                                 :> Batchnorm1d
 --                                 :> Activation Relu
 --                                 :> O 1)
-genNetwork
-  :: [Int] -> FActivation -> IO (NeuralNetwork Float)
-genNetwork nodes fact = do
-    weights <- Prelude.mapM genWeights nodes'
-    let ls = map (\(w, b) -> Linear w b) weights
-    return $ intersperse (Activation fact) ls
-  where
-    nodes' = zip nodes (tail nodes)
 
 -- | Perform a binary classification
 inferBinary
@@ -441,18 +455,35 @@ inferBinary net dta =
   -- Thresholding the NN output
   in compute $ A.map (\a -> if a < 0.5 then 0 else 1) prediction
 
--- | Binary classification accuracy in percent
-accuracy
-  :: [Layer Float]
-  -- ^ Neural network
-  -> (Matrix Float, Matrix Float)
-  -- ^ Dataset
-  -> Float
-accuracy net (dta, tgt) = 100 * (1 - e / m)
+maxIndex :: (Ord a, Num b, Enum b) => [a] -> b
+maxIndex xs = snd $ maximumBy (comparing fst) (zip xs [0..])
+
+winnerTakesAll ::
+  Matrix Float  -- ^ Mini-batch of vectors
+  -> [Int]  -- ^ List of maximal indices
+winnerTakesAll m = map maxIndex xs
   where
-    predictions = net `inferBinary` dta
-    e = A.sum $ abs (tgt .- predictions)
-    m = fromIntegral $ rows tgt
+    xs = toLists2 m
+
+errors :: Eq lab => [(lab, lab)] -> [(lab, lab)]
+errors = filter (uncurry (/=))
+{-# SPECIALIZE errors :: [(Int, Int)] -> [(Int, Int)] #-}
+
+accuracy :: (Eq a, Fractional acc) => [a] -> [a] -> acc
+accuracy tgt pr = 100 * r
+  where
+    errNo = length $ errors (zip tgt pr)
+    r = 1 - fromIntegral errNo / fromIntegral (length tgt)
+{-# SPECIALIZE accuracy :: [Int] -> [Int] -> Float #-}
+
+_accuracy :: NeuralNetwork Float
+  -> (Matrix Float, Matrix Float)
+  -> Float
+-- NB: better avoid double conversion to and from one-hot-encoding
+_accuracy net (batch, labelsOneHot) =
+  let batchResults = winnerTakesAll $ forward net batch
+      expected = winnerTakesAll labelsOneHot
+  in accuracy expected batchResults
 
 avgAccuracy
   :: Monad m
@@ -461,7 +492,7 @@ avgAccuracy
   -> m Float
 avgAccuracy net stream = s // len
   where
-    results = S.map (accuracy net) stream
+    results = S.map (_accuracy net) stream
     s = S.sum results
     len = fromIntegral <$> S.length results
     (//) = liftA2 (/)

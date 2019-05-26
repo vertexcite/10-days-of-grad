@@ -14,6 +14,7 @@ library
   default-language:     Haskell2010
   exposed-modules:
     NeuralNetwork
+    , Shuffle
 
   -- other-modules:
 
@@ -23,11 +24,13 @@ library
       , mwc-random
       , random
       , streamly
+      , MonadRandom
+      , array
 
   hs-source-dirs:
       src
 
-executable main-exe
+executable mnist
   hs-source-dirs:      app
   main-is:             Main.hs
   ghc-options:
@@ -43,3 +46,8 @@ executable main-exe
       , random
       , streamly
       , batchnorm
+      , mnist-idx
+      , vector
+      , transformers
+      , deepseq
+      , split
