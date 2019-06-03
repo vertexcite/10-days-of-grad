@@ -358,7 +358,7 @@ pass phase net (x, tgt) = (pred, grads)
 
         (dZ, pred, t) = _pass y layers
 
-        dY = getActivation' symbol y dZ  -- Backward
+        dY = getActivation' symbol inp dZ  -- Backward
 
 -- | Broadcast a vector in Dim2
 rowsLike :: Manifest r Ix1 Float
