@@ -20,6 +20,7 @@ library
 
   build-depends:
         base                    >= 4.7 && < 4.13
+      , backprop
       , massiv
       , mwc-random
       , random
@@ -41,6 +42,7 @@ executable mnist
   default-language:    Haskell2010
   build-depends:
         base                    >= 4.7  && < 4.13
+      , backprop
       , bytestring
       , massiv
       , random
