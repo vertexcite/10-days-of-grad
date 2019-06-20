@@ -1,4 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DeriveGeneric               #-}
 
 -- | = Batch normalization demo
 
@@ -13,9 +15,32 @@ import           Control.Monad.Trans.Maybe
 import           Data.IDX
 import qualified Data.Vector.Unboxed as V
 import           Data.List.Split ( chunksOf )
+import           Numeric.Backprop
+import           Lens.Micro.TH
+import           GHC.Generics ( Generic )
 
 import           NeuralNetwork
 import           Shuffle ( shuffleIO )
+
+data Net = Net { _w1 :: Matrix Float
+               , _b1 :: Vector Float
+               , _w2 :: Matrix Float
+               , _b2 :: Vector Float
+               , _w3 :: Matrix Float
+               , _b3 :: Vector Float
+               }
+  deriving (Show, Generic)
+
+instance Backprop Net
+
+makeLenses ''Net
+
+forward net x = linear z (net ^^. w3, net ^^. b3)
+  where
+    -- First layer
+    y = relu_ $ linear x (net ^^. w1, net ^^. b1)
+    -- Second layer
+    z = relu_ $ linear y (net ^^. w2, net ^^. b2)
 
 loadMNIST
   :: FilePath -> FilePath -> IO (Maybe [(Matrix Float, Matrix Float)])
@@ -57,12 +82,23 @@ main = do
   testS <- mnistStream 1000 "data/t10k-images-idx3-ubyte" "data/t10k-labels-idx1-ubyte"
 
   let [i, h1, h2, o] = [784, 300, 50, 10]
-  (w1, b1) <- genWeights (i, h1)
+  (w1_, b1_) <- genWeights (i, h1)
   let ones n = A.replicate Par (Sz1 n) 1 :: Vector Float
       zeros n = A.replicate Par (Sz1 n) 0 :: Vector Float
-  (w2, b2) <- genWeights (h1, h2)
-  (w3, b3) <- genWeights (h2, o)
+  (w2_, b2_) <- genWeights (h1, h2)
+  (w3_, b3_) <- genWeights (h2, o)
 
+  let net = Net { _w1 = w1_
+                , _b1 = b1_
+                , _w2 = w2_
+                , _b2 = b2_
+                , _w3 = w3_
+                , _b3 = b3_
+                }
+
+  return ()
+
+  {-
   -- With batchnorm
   -- NB: Layer' has only weights, no biases.
   -- The reason is that Batchnorm1d layer has trainable
@@ -105,3 +141,4 @@ main = do
 
   acc2 <- net2' `avgAccuracy` testS
   putStrLn $ printf "Validation accuracy (SGD) %.1f" acc2
+  -}

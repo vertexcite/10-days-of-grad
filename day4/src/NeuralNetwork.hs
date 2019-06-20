@@ -18,6 +18,12 @@ module NeuralNetwork
   , genWeights
   , forward
 
+  -- * Differentiable functions
+  , sigmoid_
+  , relu_
+  , linear
+  , mm
+
   -- * Training
   , sgd
 
@@ -195,6 +201,9 @@ linearX' :: Matrix Float
         -> Matrix Float
         -> Matrix Float
 linearX' w dy = compute $ dy `multiplyTransposed` w
+
+-- | Fully-connected layer
+linear x (w, b) = bias_ (x `mm` w) b
 
 -- Backprop instances
 instance (Index ix, Unbox el, Floating el) => Backprop (Array U ix el) where

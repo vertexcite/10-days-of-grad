@@ -45,6 +45,7 @@ executable mnist
       , backprop
       , bytestring
       , massiv
+      , microlens-th
       , random
       , streamly
       , batchnorm
