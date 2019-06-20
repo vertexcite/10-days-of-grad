@@ -202,6 +202,12 @@ instance (Index ix, Unbox el, Floating el) => Backprop (Array U ix el) where
   add a b = compute $ a .+ b
   one a = A.replicate Par (size a) 1
 
+-- | Bias gradient
+bias' :: Matrix Float -> Vector Float
+bias' dY = compute $ k `_scale` (_sumRows dY)
+  where
+    k = recip $ fromIntegral $ rows dY
+
 -- | Matrix multiplication
 mm :: Reifies s W
     => BVar s (Matrix Float)
@@ -215,11 +221,40 @@ mm = liftOp2. op2 $ \x y ->
   )
 {-# INLINE mm #-}
 
--- | Bias gradient
-bias' :: Matrix Float -> Vector Float
-bias' dY = compute $ k `_scale` (_sumRows dY)
-  where
-    k = recip $ fromIntegral $ rows dY
+bias_ :: Reifies s W
+    => BVar s (Matrix Float)
+    -> BVar s (Vector Float)
+    -> BVar s (Matrix Float)
+bias_ = liftOp2. op2 $ \inp b ->
+  ( compute $ inp .+ (b `rowsLike` inp)
+  , \d -> (undefined, compute $ _sumRows d)
+  )
+{-# INLINE bias_ #-}
+
+-- | Elementwise sigmoid
+sigmoid_ :: Reifies s W
+    => BVar s (Matrix Float)
+    -> BVar s (Matrix Float)
+sigmoid_ = liftOp1. op1 $ \x ->
+  let f x' = recip $ 1.0 + exp (-x')
+      y = computeMap f x
+      ones = A.replicate Par (size y) 1.0 :: Matrix Float
+  in (y, \d -> compute $ d .* y .* (ones .- y))
+{-# INLINE sigmoid_ #-}
+
+-- | Elementwise ReLU
+relu_ :: Reifies s W
+    => BVar s (Matrix Float)
+    -> BVar s (Matrix Float)
+relu_ = liftOp1. op1 $ \x ->
+  let f x = if x <= 0
+               then 0
+               else x
+      f' x0 dy0 = if x0 <= 0
+                     then 0
+                     else dy0
+  in (computeMap f x, \d -> compute $ A.zipWith f' x d)
+{-# INLINE relu_ #-}
 
 -- | Forward pass in a neural network:
 -- exploit Haskell lazyness to never compute the
