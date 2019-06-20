@@ -5,6 +5,7 @@
 -- networks training.
 
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module NeuralNetwork
   ( NeuralNetwork
@@ -50,6 +51,7 @@ import           Data.Massiv.Array hiding ( map, zip, zipWith )
 import qualified Data.Massiv.Array as A
 import           Streamly
 import qualified Streamly.Prelude as S
+import           Numeric.Backprop
 
 type MatrixPrim r a = Array r Ix2 a
 type Matrix a = Array U Ix2 a
@@ -193,6 +195,25 @@ linearX' :: Matrix Float
         -> Matrix Float
         -> Matrix Float
 linearX' w dy = compute $ dy `multiplyTransposed` w
+
+-- Backprop instances
+instance (Index ix, Unbox el, Floating el) => Backprop (Array U ix el) where
+  zero a = A.replicate Par (size a) 0
+  add a b = compute $ a .+ b
+  one a = A.replicate Par (size a) 1
+
+-- | Matrix multiplication
+mm :: Reifies s W
+    => BVar s (Matrix Float)
+    -> BVar s (Matrix Float)
+    -> BVar s (Matrix Float)
+mm = liftOp2. op2 $ \x y ->
+  ( compute $ x |*| y
+  , \d -> let m1 = compute $ d `multiplyTransposed` y
+              m2 = (compute $ transpose x) |*| d
+          in (m1, m2)
+  )
+{-# INLINE mm #-}
 
 -- | Bias gradient
 bias' :: Matrix Float -> Vector Float
