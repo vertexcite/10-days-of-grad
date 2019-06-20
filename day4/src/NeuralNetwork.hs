@@ -23,6 +23,8 @@ module NeuralNetwork
   , relu_
   , linear
   , mm
+  , log_softmax
+  , nll
 
   -- * Training
   , sgd
@@ -205,11 +207,44 @@ linearX' w dy = compute $ dy `multiplyTransposed` w
 -- | Fully-connected layer
 linear x (w, b) = bias_ (x `mm` w) b
 
--- Backprop instances
+-- Backprop instance
 instance (Index ix, Unbox el, Floating el) => Backprop (Array U ix el) where
   zero a = A.replicate Par (size a) 0
   add a b = compute $ a .+ b
   one a = A.replicate Par (size a) 1
+
+{-
+instance (Index ix, Unbox el, Num el) => Num (Array U ix el) where
+  negate      = computeMap negate
+  a + b       = compute $ a .+ b
+  a * b       = compute $ a .* b
+  fromInteger = undefined
+  abs         = computeMap abs
+  signum      = computeMap signum
+
+instance (Index ix, Unbox el, Floating el) => Floating (Array U ix el) where
+  pi = undefined
+  exp = computeMap exp
+  log = computeMap log
+  sin = computeMap sin
+  cos = computeMap cos
+  sinh = computeMap sinh
+  cosh = computeMap cosh
+  asinh = computeMap asinh
+  acosh = computeMap acosh
+  atanh = computeMap atanh
+
+instance (Index ix, Unbox el, Fractional el) => Fractional (Array U ix el) where
+    a / b       = compute $ a ./ b
+    recip = computeMap recip
+    fromRational = undefined
+-}
+
+-- x - x.exp().sum(-1).log().unsqueeze(-1)
+log_softmax x = undefined
+
+-- -input[range(target.shape[0]), target].mean()
+nll input target = undefined
 
 -- | Bias gradient
 bias' :: Matrix Float -> Vector Float

@@ -35,6 +35,9 @@ instance Backprop Net
 
 makeLenses ''Net
 
+forward
+  :: Reifies s W =>
+     BVar s Net -> BVar s (Matrix Float) -> BVar s (Matrix Float)
 forward net x = linear z (net ^^. w3, net ^^. b3)
   where
     -- First layer
