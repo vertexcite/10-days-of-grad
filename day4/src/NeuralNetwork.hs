@@ -23,7 +23,7 @@ module NeuralNetwork
   , relu_
   , linear
   , mm
-  , log_softmax
+  , logSoftmax
   , nll
 
   -- * Training
@@ -204,6 +204,7 @@ linearX' :: Matrix Float
         -> Matrix Float
 linearX' w dy = compute $ dy `multiplyTransposed` w
 
+-- TODO: normalize (weight) learning rates by the batch size
 -- | Fully-connected layer
 linear x (w, b) = bias_ (x `mm` w) b
 
@@ -241,10 +242,21 @@ instance (Index ix, Unbox el, Fractional el) => Fractional (Array U ix el) where
 -}
 
 -- x - x.exp().sum(-1).log().unsqueeze(-1)
-log_softmax x = undefined
+logSoftmax :: Matrix Float -> Matrix Float
+logSoftmax x =
+  let x0 = compute $ expA x :: Matrix Float
+      x1 = compute $ A.map log (_sumCols x0) :: Vector Float
+      x2 = x1 `colsLike` x
+  in compute $ x .- x2
 
 -- -input[range(target.shape[0]), target].mean()
-nll input target = undefined
+-- >> ?
+-- -input[:, target].mean()
+nll :: Matrix Float -> Vector Float -> Float
+nll out targets = undefined
+
+-- https://ljvmiranda921.github.io/notebook/2017/08/13/softmax-and-the-negative-log-likelihood/
+-- crossEntropyGrad = ypred - yTargetOneHot
 
 -- | Bias gradient
 bias' :: Matrix Float -> Vector Float
