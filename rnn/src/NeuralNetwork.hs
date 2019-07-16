@@ -5,6 +5,7 @@
 -- networks training.
 
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module NeuralNetwork
   ( NeuralNetwork
@@ -24,6 +25,7 @@ module NeuralNetwork
   , accuracy
   , avgAccuracy
   , inferBinary
+  , rnn
   , winnerTakesAll
 
   -- * Helpers
@@ -80,45 +82,48 @@ data Gradients a = -- Weight and bias gradients
 data Phase = Train | Eval deriving (Show, Eq)
 
 -- | Lookup activation function by a symbol
-getActivation :: FActivation -> (Matrix Float -> Matrix Float)
+getActivation :: Index ix =>
+  FActivation -> (Array U ix Float -> Array U ix Float)
 getActivation Id = id
 getActivation Sigmoid = sigmoid
 getActivation Relu = relu
 
 -- | Lookup activation function derivative by a symbol
 getActivation'
-  :: FActivation
-  -> (Matrix Float -> Matrix Float -> Matrix Float)
+  :: Index ix => FActivation
+  -> (Array U ix Float -> Array U ix Float -> Array U ix Float)
 getActivation' Id = flip const
 getActivation' Sigmoid = sigmoid'
 getActivation' Relu = relu'
 
 -- | Elementwise sigmoid computation
-sigmoid :: Matrix Float -> Matrix Float
+sigmoid :: Index ix => Array U ix Float -> Array U ix Float
 sigmoid = computeMap f
   where
     f x = recip $ 1.0 + exp (-x)
 
 -- | Compute sigmoid gradients
-sigmoid' :: Matrix Float
-         -> Matrix Float
-         -> Matrix Float
+sigmoid' :: forall ix. Index ix
+         => Array U ix Float
+         -> Array U ix Float
+         -> Array U ix Float
 sigmoid' x dY =
   let sz = size x
-      ones = A.replicate Par sz 1.0 :: Matrix Float
+      ones = A.replicate Par sz 1.0 :: Array U ix Float
       y = sigmoid x
   in compute $ dY .* y .* (ones .- y)
 
-relu :: Matrix Float -> Matrix Float
+relu :: Index ix => Array U ix Float -> Array U ix Float
 relu = computeMap f
   where
     f x = if x < 0
              then 0
              else x
 
-relu' :: Matrix Float
-      -> Matrix Float
-      -> Matrix Float
+relu' :: Index ix
+      => Array U ix Float
+      -> Array U ix Float
+      -> Array U ix Float
 relu' x = compute. A.zipWith f x
   where
     f x0 dy0 = if x0 <= 0
@@ -195,6 +200,41 @@ bias' :: Matrix Float -> Vector Float
 bias' dY = compute $ m `_scale` (_sumRows dY)
   where
     m = recip $ fromIntegral $ rows dY
+
+-- | Recurrent neural network defined by the set of equations
+--
+-- \( x_n = f(W^I u_n + W^X x_{n-1} + b^X), \)
+--
+-- \( y_n = W^R x_n, \)
+--
+-- where \(u_n\) is the \(n\)-th input and \(f(x)\) is an element-wise
+-- nonlinear activation function. The network retains its internal
+-- state \(x_n\) while receiving new inputs \(u_n\).
+rnn
+  :: (Matrix Float, Matrix Float, Vector Float, Matrix Float)
+  -- ^ Input weights \(W^I\), internal state weights \(W^X\), biases \(b^X\), and readout weights \(W^R\)
+  -> FActivation  -- ^ Activation function \(f\)
+  -> Vector Float  -- ^ Previous hidden state \(x_{n-1}\)
+  -> Vector Float  -- ^ Input \(u_n\)
+  -> (Vector Float, Vector Float)
+  -- ^ New hidden state \(x_n\) and output \(y_n\)
+rnn (wI, wX, bX, wR) fAct x' dta = (flatten x, flatten y)
+  where
+    -- First, reshape input vectors to matrices since multiplication
+    -- operator |*| is defined only for matrices.
+    x1 = vec2m x'
+    u = vec2m dta
+    b = vec2m bX
+
+    f = getActivation fAct
+    x = f (compute ((wI |*| u) .+ (wX |*| x1) .+ b))
+    y = wR |*| x
+
+-- | Convert vector to an n×1 matrix
+vec2m :: Vector Float -> Matrix Float
+vec2m v = resize' sz v
+  where
+    sz = Sz (elemsCount v :. 1)
 
 -- | Forward pass in a neural network:
 -- exploit Haskell lazyness to never compute the
