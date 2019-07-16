@@ -25,7 +25,10 @@ module NeuralNetwork
   , accuracy
   , avgAccuracy
   , inferBinary
+  , RNNState (..)
   , rnn
+  , runRNN
+  , runRNN0
   , winnerTakesAll
 
   -- * Helpers
@@ -201,6 +204,9 @@ bias' dY = compute $ m `_scale` (_sumRows dY)
   where
     m = recip $ fromIntegral $ rows dY
 
+-- This type is to avoid parameter mismatch
+newtype RNNState = State { state :: Vector Float }
+
 -- | Recurrent neural network defined by the set of equations
 --
 -- \( x_n = f(W^I u_n + W^X x_{n-1} + b^X), \)
@@ -214,11 +220,11 @@ rnn
   :: (Matrix Float, Matrix Float, Vector Float, Matrix Float)
   -- ^ Input weights \(W^I\), internal state weights \(W^X\), biases \(b^X\), and readout weights \(W^R\)
   -> FActivation  -- ^ Activation function \(f\)
-  -> Vector Float  -- ^ Previous hidden state \(x_{n-1}\)
   -> Vector Float  -- ^ Input \(u_n\)
-  -> (Vector Float, Vector Float)
-  -- ^ New hidden state \(x_n\) and output \(y_n\)
-rnn (wI, wX, bX, wR) fAct x' dta = (flatten x, flatten y)
+  -> RNNState  -- ^ Previous hidden state \(x_{n-1}\)
+  -> (Vector Float, RNNState)
+  -- ^ Output \(y_n\) and new hidden state \(x_n\)
+rnn (wI, wX, bX, wR) fAct dta (State x') = (flatten y, State (flatten x))
   where
     -- First, reshape input vectors to matrices since multiplication
     -- operator |*| is defined only for matrices.
@@ -229,6 +235,36 @@ rnn (wI, wX, bX, wR) fAct x' dta = (flatten x, flatten y)
     f = getActivation fAct
     x = f (compute ((wI |*| u) .+ (wX |*| x1) .+ b))
     y = wR |*| x
+
+-- | Run a recurrent neural network from given initial hidden state.
+runRNN
+  :: (Matrix Float, Matrix Float, Vector Float, Matrix Float)
+  -- ^ Input weights \(W^I\), internal state weights \(W^X\), biases \(b^X\), and readout weights \(W^R\)
+  -> FActivation  -- ^ Activation function \(f\)
+  -> RNNState  -- ^ Initial hidden state \(x_{n-1}\)
+  -> [Vector Float]  -- ^ Input vectors list
+  -> [Vector Float]  -- ^ Outputs
+runRNN w fAct x0 inps = map fst p
+  where
+    p = scanr q (undefined, x0) inps
+    q inp (_, xprev) = rnn w fAct inp xprev
+
+-- | Run a recurrent neural network from zero initial hidden state.
+-- Inputs are given as a (lazy) list so that the network should be
+-- able to provide its own outputs as its new inputs.
+-- For instance:
+--
+-- >>> let results = runRNN0 w Sigmoid (dta: results)
+-- >>> take 5 results
+runRNN0
+  :: (Matrix Float, Matrix Float, Vector Float, Matrix Float)
+  -- ^ Input weights \(W^I\), internal state weights \(W^X\), biases \(b^X\), and readout weights \(W^R\)
+  -> FActivation  -- ^ Activation function \(f\)
+  -> [Vector Float]  -- ^ Input vectors
+  -> [Vector Float]  -- ^ Output vectors
+runRNN0 w@(_, wX, _, _) fAct = runRNN w fAct (State x0)
+  where
+    x0 = A.replicate Par (Sz (rows wX)) 0 :: Vector Float
 
 -- | Convert vector to an n×1 matrix
 vec2m :: Vector Float -> Matrix Float
