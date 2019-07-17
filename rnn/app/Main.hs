@@ -64,7 +64,7 @@ main = do
   let net0 = (wI, wX, bX, wR)
       fAct = Relu
 
-  net' <- sgdRNN hidden_layers lr epochs net0 fAct s
+  net' <- sgdRNN lr epochs net0 fAct s
 
   let initial = 50
       sine' = map A.singleton sine

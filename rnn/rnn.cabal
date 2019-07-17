@@ -24,7 +24,7 @@ library
       , random
       , streamly
       , MonadRandom
-      , array
+      -- , array
 
   hs-source-dirs:
       src
@@ -40,11 +40,11 @@ executable sine
   default-language:    Haskell2010
   build-depends:
         base                    >= 4.7  && < 4.13
-      , bytestring
+      -- , bytestring
       , massiv
-      , random
+      -- , random
       , streamly
       , rnn
-      , vector
-      , transformers
-      , split
+      -- , vector
+      -- , transformers
+      -- , split

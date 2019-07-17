@@ -44,6 +44,7 @@ module NeuralNetwork
 
 import           Control.Monad ( replicateM, foldM )
 import           Control.Applicative ( liftA2 )
+import           Data.List ( foldl1' )
 import qualified System.Random as R
 import           System.Random.MWC ( createSystemRandom )
 import           System.Random.MWC.Distributions ( standard )
@@ -358,9 +359,7 @@ br1 rows' = expandWithin Dim1 rows' const
 --                  x3
 --
 sgdRNN :: Monad m
-  => Int
-  -- ^ Hidden layers for the recurrent layer approximation
-  -> Float
+  => Float
   -- ^ Learning rate
   -> Int
   -- ^ No of iterations
@@ -371,7 +370,7 @@ sgdRNN :: Monad m
   -> SerialT m ([Vector Float], Vector Float)
   -- ^ Data stream of inputs u1..uN and desired target yN
   -> m RNNWeights
-sgdRNN hidden_layers lr n w0 fAct dataStream = iterN n step w0
+sgdRNN lr n w0 fAct dataStream = iterN n step w0
   where
     step w = S.foldl' g w dataStream
 
@@ -381,25 +380,92 @@ sgdRNN hidden_layers lr n w0 fAct dataStream = iterN n step w0
       -> RNNWeights
       -- ^ Trained neural network weights
     g w@(wI, wX, bX, wR) dta =
-      let (dwI, dwX, dbX, dwR) = gradRNN hidden_layers w fAct dta
+      let (dwI, dwX, dbX, dwR) = gradRNN w fAct dta
           wI1 = compute $ wI .- lr `_scale` dwI
           wX1 = compute $ wX .- lr `_scale` dwX
           bX1 = compute $ bX .- lr `_scale` dbX
           wR1 = compute $ wR .- lr `_scale` dwR
       in (wI1, wX1, bX1, wR1)
 
--- | Manually compute gradients for a two hidden layers approximation
+-- | Compute gradients for a deep approximation
 gradRNN
-  :: Int
-  -- ^ Hidden layers for the recurrent layer approximation
-  -> RNNWeights
+  :: RNNWeights
   -- ^ Neural network weights
   -> FActivation
   -- ^ Activation function
   -> ([Vector Float], Vector Float)
   -- ^ Training example: inputs u1..uN and desired target yN
   -> RNNGradients
-gradRNN hidden_layers w0 fAct dta = (dwI, dwX, dbX, dwR)
+gradRNN w0 fAct dta = (dwI, dwX, dbX, dwR)
+  where
+    (u:us, target) = dta
+
+    f = getActivation fAct
+
+    -- Initial weights
+    (wI, wX, bX, wR) = w0
+
+    -- Zero initial hidden state
+    x0 = A.replicate Par (Sz (rows wX)) 0 :: Vector Float
+
+    -- Step 1: from the first input to hidden layers
+    u0 = u <# wI :: Vector Float
+
+    -- Step 2: other inputs to hidden layers and between hidden layers:
+    -- scan over `us` and prev value of hidden state `xprev`
+    x1 = f (compute (u0 .+ x0 <# wX .+ bX)) :: Vector Float
+
+    -- Add as many hidden layers as there are inputs in `us`.
+    -- NB: x1 is already an element in xs.
+    -- NB: scanr reverses the list (convenient for backprop).
+    xN:xs = scanr (\u_0 x_0 ->
+      let u_1 = compute (u_0 <# wI) :: Vector Float
+          x_1 = f (compute (u_1 .+ x_0 <# wX .+ bX))
+       in x_1) x1 us
+
+    -- u1 = compute (u_ <# wI) :: Vector Float
+    -- x2 = f (compute (u1 .+ x1 <# wX .+ bX)) :: Vector Float
+
+    -- Step 3: readout
+    y = xN <# wR
+
+    -- Loss gradient
+    err = loss' (vec2m' y) (vec2m target)
+
+    -- Step 3: readout gradient dwR
+    dwR = linearW' (vec2m' xN) err
+    dXN = linearX' wR err
+
+    -- Step 2: accumulate intermediate gradients as dwX and db
+    ddd = scanr (\x_0 (_, dx_1, _) ->
+      let dwX_0 = linearW' (vec2m' x_0) dx_1
+          dx_0 = linearX' wX dx_1
+          dbX_0 = bias' dx_1
+       in (dwX_0, dx_0, dbX_0)) (undefined, dXN, undefined) xs
+
+    -- NB: the last tuple contains undefined and, therefore,
+    -- should not be used.
+    grads = init ddd
+
+    sum' a b = compute (a .+ b)
+    dwX = foldl1' sum' $ map (\(x, _, _) -> x) grads
+    dbX = foldl1' sum' $ map (\(_, _, x) -> x) grads
+
+    (_, dX0, _) = head grads
+
+    -- Step 1: dwI
+    dwI = linearW' (vec2m' u) dX0
+
+-- | Manually compute gradients for a two hidden layers approximation
+gradRNN'
+  :: RNNWeights
+  -- ^ Neural network weights
+  -> FActivation
+  -- ^ Activation function
+  -> ([Vector Float], Vector Float)
+  -- ^ Training example: inputs u1..uN and desired target yN
+  -> RNNGradients
+gradRNN' w0 fAct dta = (dwI, dwX, dbX, dwR)
   where
     (u:u_:_, target) = dta :: ([Vector Float], Vector Float)
 
@@ -429,22 +495,22 @@ gradRNN hidden_layers w0 fAct dta = (dwI, dwX, dbX, dwR)
 
     -- Step 3: readout gradient dwR
     dwR = linearW' (vec2m' x2) err
-    dX3 = linearX' wR err
+    dX2 = linearX' wR err
 
     -- Step 2: accumulate intermediate gradients as dwX and db
-    dwX2 = linearW' (vec2m' x1) dX3
-    dX2 = linearX' wX dX3
-    dbX2 = bias' dX3
-
-    dwX1 = linearW' (vec2m' x0) dX2
+    dwX1 = linearW' (vec2m' x1) dX2
     dX1 = linearX' wX dX2
     dbX1 = bias' dX2
 
-    dwX = compute (dwX2 .+ dwX1) :: Matrix Float
-    dbX = compute (dbX2 .+ dbX1) :: Vector Float
+    dwX0 = linearW' (vec2m' x0) dX1
+    dX0 = linearX' wX dX1
+    dbX0 = bias' dX1
+
+    dwX = compute (dwX1 .+ dwX0) :: Matrix Float
+    dbX = compute (dbX1 .+ dbX0) :: Vector Float
 
     -- Step 1: dwI
-    dwI = linearW' (vec2m' u) dX1
+    dwI = linearW' (vec2m' u) dX0
 
 -- | Strict left fold
 iterN :: Monad m => Int -> (a -> m a) -> a -> m a
