@@ -200,7 +200,7 @@ linearX' w dy = compute $ dy `multiplyTransposed` w
 
 -- | Bias gradient
 bias' :: Matrix Float -> Vector Float
-bias' dY = compute $ m `_scale` (_sumRows dY)
+bias' dY = compute $ m `_scale` _sumRows dY
   where
     m = recip $ fromIntegral $ rows dY
 
@@ -282,7 +282,7 @@ forward net dta = fst $ pass Eval net (dta, undefined)
 softmax :: Matrix Float -> Matrix Float
 softmax x =
   let x0 = compute $ expA x :: Matrix Float
-      x1 = compute $ (_sumCols x0) :: Vector Float  -- Sumcols in this case!
+      x1 = compute $ _sumCols x0 :: Vector Float  -- Sumcols in this case!
       x2 = x1 `colsLike` x
   in (compute $ x0 ./ x2)
 
@@ -328,7 +328,7 @@ pass phase net (x, tgt) = (pred, grads)
     _pass inp (Linear' w:layers) = (dX, pred, Linear'Gradients dW:t)
       where
         -- Forward
-        lin = compute $ (inp |*| w)
+        lin = compute (inp |*| w)
 
         (dZ, pred, t) = _pass lin layers
 
@@ -357,12 +357,12 @@ colsLike v m = br1 (cols m) v
 -- | Broadcast by the given number of rows
 br :: Manifest r Ix1 Float
    => Int -> Array r Ix1 Float -> MatrixPrim D Float
-br rows' v = expandWithin Dim2 rows' const v
+br rows' = expandWithin Dim2 rows' const
 
 -- | Broadcast by the given number of cols
 br1 :: Manifest r Ix1 Float
    => Int -> Array r Ix1 Float -> MatrixPrim D Float
-br1 rows' v = expandWithin Dim1 rows' const v
+br1 rows' = expandWithin Dim1 rows' const
 
 -- | Stochastic gradient descent
 sgd :: Monad m
@@ -384,7 +384,7 @@ sgd lr n net0 dataStream = iterN n epochStep net0
       -> NeuralNetwork Float
     g net dta =
       let (_, dW) = pass Train net dta
-      in (zipWith f net dW)
+      in zipWith f net dW
 
     f :: Layer Float -> Gradients Float -> Layer Float
 
@@ -475,7 +475,7 @@ avgAccuracy net stream = s // len
 
 -- | Average elements in each column
 mean :: Matrix Float -> Vector Float
-mean ar = compute $ m `_scale` (_sumRows ar)
+mean ar = compute $ m `_scale` _sumRows ar
   where
     m = recip $ fromIntegral (rows ar)
 
