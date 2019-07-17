@@ -274,10 +274,10 @@ runRNN'
   -> RNNState  -- ^ Initial hidden state \(x_{n-1}\)
   -> [Vector Float]  -- ^ Input vectors list
   -> [(Vector Float, RNNState)]  -- ^ Outputs with recurrent layer states
-runRNN' w fAct x0 inps = p
+runRNN' w fAct x0 inps = drop 1 p
   where
-    p = scanr q (undefined, x0) inps
-    q inp (_, xprev) = rnn w fAct inp xprev
+    p = scanl q (undefined, x0) inps
+    q (_, xprev) inp = rnn w fAct inp xprev
 
 -- | Run a recurrent neural network from zero initial state
 initRNN
