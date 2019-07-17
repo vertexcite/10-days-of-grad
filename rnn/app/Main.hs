@@ -8,7 +8,7 @@
 -- paths: either up or down. Moreover there is a need to store
 -- a part of trajectory to be able to tell how fast you go down (up).
 
-import           Data.Massiv.Array hiding ( map, zip, unzip, replicate, mapM )
+import           Data.Massiv.Array hiding ( map, zip, unzip, replicate, zipWith )
 import qualified Data.Massiv.Array as A
 import           Streamly
 import qualified Streamly.Prelude as S
@@ -34,10 +34,10 @@ sineStream n n_inputs = return $ S.fromList (take n ys)
                     in (init d, last d)) chunks
 
 -- Used for verification
-sine :: [Vector Float]
+sine :: [Float]
 sine =
   let xs = [0.5,0.52..10]
-  in map (\x -> A.singleton $ sin (2 * pi * x)) xs
+  in map (\x -> sin (2 * pi * x)) xs
 
 -- | A sliding window
 window :: Int -> [a] -> [[a]]
@@ -54,8 +54,8 @@ main = do
       hidden_layers = 2
 
   s <- sineStream 200 hidden_layers
-  let epochs = 10
-      lr = 0.1
+  let epochs = 2  -- 10
+      lr = 0.001
 
   (wI, _) <- genWeights (i, h)
   (wX, bX) <- genWeights (h, h)
@@ -67,19 +67,19 @@ main = do
 
   net' <- sgdRNN hidden_layers lr epochs net0 fAct s
 
-  print net'
-
   let initial = 50
-      seedSeq = take initial sine
+      sine' = map A.singleton sine
+      seedSeq = take initial sine'
 
       -- Initialize RNN state x0
       (t0, x0) = initRNN net' fAct seedSeq
 
       -- Use own inputs
-      pt = head $ drop initial sine  -- Initial input
+      pt = head $ drop initial sine'  -- Initial input
       t = runRNN net' fAct x0 (pt: t)
-      test = take (length sine - initial) t
+      test = take (length sine' - initial) t
 
-  -- TODO: toFloat each singleton
-  -- Prelude.mapM_ (putStrLn. printf "%.3f %.3f") $ zip sine (t0 ++ test)
-  Prelude.mapM_ print $ zip sine (t0 ++ test)
+  putStrLn "Testing network"
+
+  let out = map (A.! 0) (t0 ++ test)
+  Prelude.mapM_ putStrLn $ zipWith (printf "%.3f %.3f") sine out
