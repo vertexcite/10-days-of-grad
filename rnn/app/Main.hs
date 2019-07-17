@@ -54,8 +54,8 @@ main = do
       hidden_layers = 2
 
   s <- sineStream 200 hidden_layers
-  let epochs = 2  -- 10
-      lr = 0.001
+  let epochs = 70
+      lr = 0.002
 
   (wI, _) <- genWeights (i, h)
   (wX, bX) <- genWeights (h, h)
@@ -63,7 +63,6 @@ main = do
 
   let net0 = (wI, wX, bX, wR)
       fAct = Relu
-      -- fAct = Tanh
 
   net' <- sgdRNN hidden_layers lr epochs net0 fAct s
 
@@ -78,8 +77,6 @@ main = do
       pt = head $ drop initial sine'  -- Initial input
       t = runRNN net' fAct x0 (pt: t)
       test = take (length sine' - initial) t
-
-  putStrLn "Testing network"
 
   let out = map (A.! 0) (t0 ++ test)
   Prelude.mapM_ putStrLn $ zipWith (printf "%.3f %.3f") sine out
