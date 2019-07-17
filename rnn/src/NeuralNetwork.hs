@@ -19,7 +19,7 @@ module NeuralNetwork
   , forward
 
   -- * Training
-  , sgd
+  , sgdRNN
 
   -- * Inference
   , accuracy
@@ -32,6 +32,8 @@ module NeuralNetwork
   , winnerTakesAll
 
   -- * Helpers
+  , (#>)
+  , (<#)
   , rows
   , cols
   , computeMap
@@ -133,6 +135,17 @@ relu' x = compute. A.zipWith f x
                   then 0
                   else dy0
 
+loss :: Index ix => Array U ix Float -> Array U ix Float -> Float
+loss y tgt =
+  let diff = y .- tgt
+  in A.sum $ A.map (^2) diff
+
+loss' :: Index ix
+      => Array U ix Float -> Array U ix Float -> Array U ix Float
+loss' y tgt =
+  let diff = y .- tgt
+  in compute (A.map (* 2) diff)
+
 randomishArray
   :: (Mutable r ix e, R.RandomGen a, R.Random e) =>
      (e, e) -> a -> Sz ix -> Array r ix e
@@ -224,17 +237,19 @@ rnn
   -> RNNState  -- ^ Previous hidden state \(x_{n-1}\)
   -> (Vector Float, RNNState)
   -- ^ Output \(y_n\) and new hidden state \(x_n\)
-rnn (wI, wX, bX, wR) fAct dta (State x') = (flatten y, State (flatten x))
+--
+-- rnn (wI, wX, bX, wR) fAct u (State x0) = (y, State x)
+--   where
+--     f = getActivation fAct
+--     x = f (compute (wI #> u .+ wX #> x0 .+ bX))
+--     y = wR #> x
+--
+-- Transposed version
+rnn (wI, wX, bX, wR) fAct u (State x0) = (y, State x)
   where
-    -- First, reshape input vectors to matrices since multiplication
-    -- operator |*| is defined only for matrices.
-    x1 = vec2m x'
-    u = vec2m dta
-    b = vec2m bX
-
     f = getActivation fAct
-    x = f (compute ((wI |*| u) .+ (wX |*| x1) .+ b))
-    y = wR |*| x
+    x = f (compute (u <# wI .+ x0 <# wX .+ bX))
+    y = x <# wR
 
 -- | Run a recurrent neural network from given initial hidden state.
 runRNN
@@ -267,10 +282,16 @@ runRNN0 w@(_, wX, _, _) fAct = runRNN w fAct (State x0)
     x0 = A.replicate Par (Sz (rows wX)) 0 :: Vector Float
 
 -- | Convert vector to an n×1 matrix
-vec2m :: Vector Float -> Matrix Float
+vec2m :: Unbox a => Vector a -> Matrix a
 vec2m v = resize' sz v
   where
     sz = Sz (elemsCount v :. 1)
+
+-- | Convert vector to an 1×n matrix
+vec2m' :: Unbox a => Vector a -> Matrix a
+vec2m' v = resize' sz v
+  where
+    sz = Sz (1 :. elemsCount v)
 
 -- | Forward pass in a neural network:
 -- exploit Haskell lazyness to never compute the
@@ -363,6 +384,130 @@ br rows' = expandWithin Dim2 rows' const
 br1 :: Manifest r Ix1 Float
    => Int -> Array r Ix1 Float -> MatrixPrim D Float
 br1 rows' = expandWithin Dim1 rows' const
+
+-- The first difference of this method compared to `sgd` is that
+-- the network receives as many inputs as there are
+-- 'hidden' layers. We simplify our task and only compute
+-- gradients w.r.t. the last (desired) output, therefore
+-- ignoring any intermediate outputs y_i.
+--
+-- The second difference is that all hidden layers are updated
+-- with the same gradient simultaneously.
+--
+-- Below is an illustration of the forward and backward passes:
+--
+--    <--- dU
+-- u1 -------> [] -----> [] -----> y1
+--            |  ^
+--        x1  |  |
+--            |  | dX1
+--            \/ |
+--
+--   u2 -----> [] -----> [] -----> y2
+--            |  ^
+--        x2  |  |
+--            |  | dX2
+--            \/ |
+--                <--- dX3  <--- dy3
+--     u3 ---> [] -----> [] -----> y3
+--                  x3
+--
+sgdRNN :: Monad m
+  => Int
+  -- ^ Hidden layers for the recurrent layer approximation
+  -> Float
+  -- ^ Learning rate
+  -> Int
+  -- ^ No of iterations
+  -> (Matrix Float, Matrix Float, Vector Float, Matrix Float)
+  -- ^ Neural network weights
+  -> FActivation
+  -- ^ Activation function
+  -> SerialT m ([Vector Float], Vector Float)
+  -- ^ Data stream of inputs u1..uN and desired target yN
+  -> m (Matrix Float, Matrix Float, Vector Float, Matrix Float)
+sgdRNN hidden_layers lr n_iter w0 fAct dataStream = do
+  (Just dta) <- S.head dataStream  -- The first input; TODO generalize
+  let (dwI, dwX, dbX, dwR) = gradRNN hidden_layers lr n_iter w0 fAct dta
+  return undefined
+
+-- | Matrix by vector multiplication: result is a column-vector
+infixr 7 #>
+(#>) :: (Num a, Unbox a) => Matrix a -> Vector a -> Vector a
+matr #> v = flatten r
+  where
+    v1 = vec2m v
+    r = matr |*| v1
+
+-- | Vector by matrix multiplication: result is a row-vector
+infixr 7 <#
+(<#) :: (Num a, Unbox a) => Vector a -> Matrix a -> Vector a
+v <# matr = flatten r
+  where
+    v1 = vec2m' v
+    r = v1 |*| matr
+
+-- | Manually compute gradients for a two hidden layers approximation
+gradRNN
+  :: Int
+  -- ^ Hidden layers for the recurrent layer approximation
+  -> Float
+  -- ^ Learning rate
+  -> Int
+  -- ^ No of iterations
+  -> (Matrix Float, Matrix Float, Vector Float, Matrix Float)
+  -- ^ Neural network weights
+  -> FActivation
+  -- ^ Activation function
+  -> ([Vector Float], Vector Float)
+  -- ^ Training example: inputs u1..uN and desired target yN
+  -> (Matrix Float, Matrix Float, Vector Float, Matrix Float)
+gradRNN hidden_layers lr n_iter w0 fAct dta = (dwI, dwX, dbX, dwR)
+  where
+    (u:us, target) = dta :: ([Vector Float], Vector Float)
+
+    f = getActivation fAct
+
+    -- Initial weights
+    (wI, wX, bX, wR) = w0
+
+    -- Zero initial hidden state
+    x0 = A.replicate Par (Sz (rows wX)) 0 :: Vector Float
+
+    -- Step 1: from the first input to hidden layers
+    u0 = u <# wI :: Vector Float
+
+    -- Step 2: other inputs to hidden layers and between hidden layers:
+    -- scan over `us` and prev value of hidden state `xprev`
+    x1 = f (compute (u0 .+ x0 <# wX .+ bX)) :: Vector Float
+
+    u1 = compute ((head us) <# wI) :: Vector Float
+    x2 = f (compute (u1 .+ x1 <# wX .+ bX)) :: Vector Float
+
+    -- Step 3: readout
+    y = x2 <# wR
+
+    -- Loss gradient
+    err = loss' (vec2m' y) (vec2m target)
+
+    -- Step 3: readout gradient dwR
+    dwR = linearW' (vec2m' x2) err
+    dX3 = linearX' wR err
+
+    -- Step 2: accumulate intermediate gradients as dwX and db
+    dwX2 = linearW' (vec2m' x1) dX3
+    dX2 = linearX' wX dX3
+    dbX2 = bias' dX3
+
+    dwX1 = linearW' (vec2m' x0) dX2
+    dX1 = linearX' wX dX2
+    dbX1 = bias' dX2
+
+    dwX = compute (dwX2 .+ dwX1) :: Matrix Float
+    dbX = compute (dbX2 .+ dbX1) :: Vector Float
+
+    -- Step 1: dwI
+    dwI = linearW' (vec2m' u0) dX1
 
 -- | Stochastic gradient descent
 sgd :: Monad m
