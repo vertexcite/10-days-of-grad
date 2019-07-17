@@ -8,28 +8,23 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module NeuralNetwork
-  ( NeuralNetwork
-  , Layer (..)
-  , Matrix
+  ( Matrix
   , Vector
   , FActivation (..)
   , sigmoid
   , sigmoid'
   , genWeights
-  , forward
 
   -- * Training
   , sgdRNN
 
   -- * Inference
   , accuracy
-  , avgAccuracy
-  , inferBinary
   , RNNState (..)
   , rnn
   , runRNN
-  , runRNN0
-  , winnerTakesAll
+  , runRNN'
+  , initRNN
 
   -- * Helpers
   , (#>)
@@ -68,23 +63,6 @@ type Vector a = Array U Ix1 a
 -- * Sigmoid
 -- * Identity (no activation)
 data FActivation = Relu | Sigmoid | Id
-
--- Neural network layers
-data Layer a = Linear (Matrix a) (Vector a)
-               -- Same as Linear, but without biases
-               | Linear' (Matrix a)
-               | Activation FActivation
-
-type NeuralNetwork a = [Layer a]
-
-data Gradients a = -- Weight and bias gradients
-                   LinearGradients (Matrix a) (Vector a)
-                   -- Weight gradients
-                   | Linear'Gradients (Matrix a)
-                   | NoGrad  -- No learnable parameters
-
--- | A neural network may work differently in training and evaluation modes
-data Phase = Train | Eval deriving (Show, Eq)
 
 -- | Lookup activation function by a symbol
 getActivation :: Index ix =>
@@ -175,6 +153,22 @@ randn sz = do
     _nv gen n = replicateM n (realToFrac <$> standard gen)
     {-# INLINE _nv #-}
 
+-- | Matrix by vector multiplication: result is a column-vector
+infixr 7 #>
+(#>) :: (Num a, Unbox a) => Matrix a -> Vector a -> Vector a
+matr #> v = flatten r
+  where
+    v1 = vec2m v
+    r = matr |*| v1
+
+-- | Vector by matrix multiplication: result is a row-vector
+infixr 7 <#
+(<#) :: (Num a, Unbox a) => Vector a -> Matrix a -> Vector a
+v <# matr = flatten r
+  where
+    v1 = vec2m' v
+    r = v1 |*| matr
+
 rows :: Matrix Float -> Int
 rows m =
   let (r :. _) = unSz $ size m
@@ -219,6 +213,9 @@ bias' dY = compute $ m `_scale` _sumRows dY
 
 -- This type is to avoid parameter mismatch
 newtype RNNState = State { state :: Vector Float }
+-- Just for convenience
+type RNNWeights = (Matrix Float, Matrix Float, Vector Float, Matrix Float)
+type RNNGradients = RNNWeights
 
 -- | Recurrent neural network defined by the set of equations
 --
@@ -230,7 +227,7 @@ newtype RNNState = State { state :: Vector Float }
 -- nonlinear activation function. The network retains its internal
 -- state \(x_n\) while receiving new inputs \(u_n\).
 rnn
-  :: (Matrix Float, Matrix Float, Vector Float, Matrix Float)
+  :: RNNWeights
   -- ^ Input weights \(W^I\), internal state weights \(W^X\), biases \(b^X\), and readout weights \(W^R\)
   -> FActivation  -- ^ Activation function \(f\)
   -> Vector Float  -- ^ Input \(u_n\)
@@ -252,8 +249,15 @@ rnn (wI, wX, bX, wR) fAct u (State x0) = (y, State x)
     y = x <# wR
 
 -- | Run a recurrent neural network from given initial hidden state.
+--
+-- Inputs are given as a (lazy) list so that the network should be
+-- able to provide its own outputs as its new inputs.
+-- For instance:
+--
+-- >>> let results = runRNN w Sigmoid x0 (dta: results)
+-- >>> take 5 results
 runRNN
-  :: (Matrix Float, Matrix Float, Vector Float, Matrix Float)
+  :: RNNWeights
   -- ^ Input weights \(W^I\), internal state weights \(W^X\), biases \(b^X\), and readout weights \(W^R\)
   -> FActivation  -- ^ Activation function \(f\)
   -> RNNState  -- ^ Initial hidden state \(x_{n-1}\)
@@ -261,25 +265,31 @@ runRNN
   -> [Vector Float]  -- ^ Outputs
 runRNN w fAct x0 inps = map fst p
   where
+    p = runRNN' w fAct x0 inps
+
+runRNN'
+  :: RNNWeights
+  -- ^ Input weights \(W^I\), internal state weights \(W^X\), biases \(b^X\), and readout weights \(W^R\)
+  -> FActivation  -- ^ Activation function \(f\)
+  -> RNNState  -- ^ Initial hidden state \(x_{n-1}\)
+  -> [Vector Float]  -- ^ Input vectors list
+  -> [(Vector Float, RNNState)]  -- ^ Outputs with recurrent layer states
+runRNN' w fAct x0 inps = p
+  where
     p = scanr q (undefined, x0) inps
     q inp (_, xprev) = rnn w fAct inp xprev
 
--- | Run a recurrent neural network from zero initial hidden state.
--- Inputs are given as a (lazy) list so that the network should be
--- able to provide its own outputs as its new inputs.
--- For instance:
---
--- >>> let results = runRNN0 w Sigmoid (dta: results)
--- >>> take 5 results
-runRNN0
-  :: (Matrix Float, Matrix Float, Vector Float, Matrix Float)
+-- | Run a recurrent neural network from zero initial state
+initRNN
+  :: RNNWeights
   -- ^ Input weights \(W^I\), internal state weights \(W^X\), biases \(b^X\), and readout weights \(W^R\)
   -> FActivation  -- ^ Activation function \(f\)
   -> [Vector Float]  -- ^ Input vectors
-  -> [Vector Float]  -- ^ Output vectors
-runRNN0 w@(_, wX, _, _) fAct = runRNN w fAct (State x0)
+  -> ([Vector Float], RNNState)  -- ^ Output vectors and final RNN state
+initRNN w@(_, wX, _, _) fAct inp = (map fst p, snd $ last p)
   where
     x0 = A.replicate Par (Sz (rows wX)) 0 :: Vector Float
+    p = runRNN' w fAct (State x0) inp
 
 -- | Convert vector to an n×1 matrix
 vec2m :: Unbox a => Vector a -> Matrix a
@@ -293,77 +303,12 @@ vec2m' v = resize' sz v
   where
     sz = Sz (1 :. elemsCount v)
 
--- | Forward pass in a neural network:
--- exploit Haskell lazyness to never compute the
--- gradients.
-forward
-  :: NeuralNetwork Float -> Matrix Float -> Matrix Float
-forward net dta = fst $ pass Eval net (dta, undefined)
-
 softmax :: Matrix Float -> Matrix Float
 softmax x =
   let x0 = compute $ expA x :: Matrix Float
       x1 = compute $ _sumCols x0 :: Vector Float  -- Sumcols in this case!
       x2 = x1 `colsLike` x
   in (compute $ x0 ./ x2)
-
--- | Both forward and backward neural network passes
-pass
-  :: Phase
-  -- ^ `Train` or `Eval`
-  -> NeuralNetwork Float
-  -- ^ `NeuralNetwork` `Layer`s: weights and activations
-  -> (Matrix Float, Matrix Float)
-  -- ^ Mini-batch with labels
-  -> (Matrix Float, [Gradients Float])
-  -- ^ NN computation from forward pass and weights gradients
-pass phase net (x, tgt) = (pred, grads)
-  where
-    (_, pred, grads) = _pass x net
-
-    -- Computes a tuple of:
-    -- 1) Gradients for further backward pass
-    -- 2) NN prediction
-    -- 3) Gradients of learnable parameters (where applicable)
-    _pass inp [] = (loss', pred, [])
-      where
-        -- TODO: Make softmax/loss/loss gradient a part of SGD/Adam?
-        pred = softmax inp
-
-        -- Gradient of cross-entropy loss
-        -- after softmax activation.
-        loss' = compute $ pred .- tgt
-
-    _pass inp (Linear w b:layers) = (dX, pred, LinearGradients dW dB:t)
-      where
-        -- Forward
-        lin = compute $ (inp |*| w) .+ (b `rowsLike` inp)
-
-        (dZ, pred, t) = _pass lin layers
-
-        -- Backward
-        dW = linearW' inp dZ
-        dB = bias' dZ
-        dX = linearX' w dZ
-
-    _pass inp (Linear' w:layers) = (dX, pred, Linear'Gradients dW:t)
-      where
-        -- Forward
-        lin = compute (inp |*| w)
-
-        (dZ, pred, t) = _pass lin layers
-
-        -- Backward
-        dW = linearW' inp dZ
-        dX = linearX' w dZ
-
-    _pass inp (Activation symbol:layers) = (dY, pred, NoGrad:t)
-      where
-        y = getActivation symbol inp  -- Forward
-
-        (dZ, pred, t) = _pass y layers
-
-        dY = getActivation' symbol inp dZ  -- Backward
 
 -- | Broadcast a vector in Dim2
 rowsLike :: Manifest r Ix1 Float
@@ -385,7 +330,7 @@ br1 :: Manifest r Ix1 Float
    => Int -> Array r Ix1 Float -> MatrixPrim D Float
 br1 rows' = expandWithin Dim1 rows' const
 
--- The first difference of this method compared to `sgd` is that
+-- The first difference of this method compared to normal SGD is that
 -- the network receives as many inputs as there are
 -- 'hidden' layers. We simplify our task and only compute
 -- gradients w.r.t. the last (desired) output, therefore
@@ -419,52 +364,44 @@ sgdRNN :: Monad m
   -- ^ Learning rate
   -> Int
   -- ^ No of iterations
-  -> (Matrix Float, Matrix Float, Vector Float, Matrix Float)
+  -> RNNWeights
   -- ^ Neural network weights
   -> FActivation
   -- ^ Activation function
   -> SerialT m ([Vector Float], Vector Float)
   -- ^ Data stream of inputs u1..uN and desired target yN
-  -> m (Matrix Float, Matrix Float, Vector Float, Matrix Float)
-sgdRNN hidden_layers lr n_iter w0 fAct dataStream = do
-  (Just dta) <- S.head dataStream  -- The first input; TODO generalize
-  let (dwI, dwX, dbX, dwR) = gradRNN hidden_layers lr n_iter w0 fAct dta
-  return undefined
-
--- | Matrix by vector multiplication: result is a column-vector
-infixr 7 #>
-(#>) :: (Num a, Unbox a) => Matrix a -> Vector a -> Vector a
-matr #> v = flatten r
+  -> m RNNWeights
+sgdRNN hidden_layers lr n w0 fAct dataStream = iterN n step w0
   where
-    v1 = vec2m v
-    r = matr |*| v1
+    step w = S.foldl' g w dataStream
 
--- | Vector by matrix multiplication: result is a row-vector
-infixr 7 <#
-(<#) :: (Num a, Unbox a) => Vector a -> Matrix a -> Vector a
-v <# matr = flatten r
-  where
-    v1 = vec2m' v
-    r = v1 |*| matr
+    g :: RNNWeights
+      -> ([Vector Float], Vector Float)
+      -- ^ Training inputs and target
+      -> RNNWeights
+      -- ^ Trained neural network weights
+    g w@(wI, wX, bX, wR) dta =
+      let (dwI, dwX, dbX, dwR) = gradRNN hidden_layers w fAct dta
+          wI1 = compute $ wI .- lr `_scale` dwI
+          wX1 = compute $ wX .- lr `_scale` dwX
+          bX1 = compute $ bX .- lr `_scale` dbX
+          wR1 = compute $ wR .- lr `_scale` dwR
+      in (wI1, wX1, bX1, wR1)
 
 -- | Manually compute gradients for a two hidden layers approximation
 gradRNN
   :: Int
   -- ^ Hidden layers for the recurrent layer approximation
-  -> Float
-  -- ^ Learning rate
-  -> Int
-  -- ^ No of iterations
-  -> (Matrix Float, Matrix Float, Vector Float, Matrix Float)
+  -> RNNWeights
   -- ^ Neural network weights
   -> FActivation
   -- ^ Activation function
   -> ([Vector Float], Vector Float)
   -- ^ Training example: inputs u1..uN and desired target yN
-  -> (Matrix Float, Matrix Float, Vector Float, Matrix Float)
-gradRNN hidden_layers lr n_iter w0 fAct dta = (dwI, dwX, dbX, dwR)
+  -> RNNGradients
+gradRNN hidden_layers w0 fAct dta = (dwI, dwX, dbX, dwR)
   where
-    (u:us, target) = dta :: ([Vector Float], Vector Float)
+    (u:u_:_, target) = dta :: ([Vector Float], Vector Float)
 
     f = getActivation fAct
 
@@ -481,7 +418,7 @@ gradRNN hidden_layers lr n_iter w0 fAct dta = (dwI, dwX, dbX, dwR)
     -- scan over `us` and prev value of hidden state `xprev`
     x1 = f (compute (u0 .+ x0 <# wX .+ bX)) :: Vector Float
 
-    u1 = compute ((head us) <# wI) :: Vector Float
+    u1 = compute (u_ <# wI) :: Vector Float
     x2 = f (compute (u1 .+ x1 <# wX .+ bX)) :: Vector Float
 
     -- Step 3: readout
@@ -507,43 +444,7 @@ gradRNN hidden_layers lr n_iter w0 fAct dta = (dwI, dwX, dbX, dwR)
     dbX = compute (dbX2 .+ dbX1) :: Vector Float
 
     -- Step 1: dwI
-    dwI = linearW' (vec2m' u0) dX1
-
--- | Stochastic gradient descent
-sgd :: Monad m
-  => Float
-  -- ^ Learning rate
-  -> Int
-  -- ^ No of iterations
-  -> NeuralNetwork Float
-  -- ^ Neural network
-  -> SerialT m (Matrix Float, Matrix Float)
-  -- ^ Data stream
-  -> m (NeuralNetwork Float)
-sgd lr n net0 dataStream = iterN n epochStep net0
-  where
-    epochStep net = S.foldl' g net dataStream
-
-    g :: NeuralNetwork Float
-      -> (Matrix Float, Matrix Float)
-      -> NeuralNetwork Float
-    g net dta =
-      let (_, dW) = pass Train net dta
-      in zipWith f net dW
-
-    f :: Layer Float -> Gradients Float -> Layer Float
-
-    -- Update Linear layer weights
-    f (Linear w b) (LinearGradients dW dB) =
-      Linear (compute $ w .- lr `_scale` dW) (compute $ b .- lr `_scale` dB)
-
-    f (Linear' w) (Linear'Gradients dW) =
-      Linear' (compute $ w .- lr `_scale` dW)
-
-    -- No parameters to change
-    f layer NoGrad = layer
-
-    f _ _ = error "Layer/gradients mismatch"
+    dwI = linearW' (vec2m' u) dX1
 
 -- | Strict left fold
 iterN :: Monad m => Int -> (a -> m a) -> a -> m a
@@ -568,23 +469,8 @@ genWeights (nin, nout) = do
 
       _genBiases n = randn (Sz n)
 
--- | Perform a binary classification
-inferBinary
-  :: NeuralNetwork Float -> Matrix Float -> Matrix Float
-inferBinary net dta =
-  let prediction = forward net dta
-  -- Thresholding the NN output
-  in compute $ A.map (\a -> if a < 0.5 then 0 else 1) prediction
-
 maxIndex :: (Ord a, Num b, Enum b) => [a] -> b
 maxIndex xs = snd $ maximumBy (comparing fst) (zip xs [0..])
-
-winnerTakesAll ::
-  Matrix Float  -- ^ Mini-batch of vectors
-  -> [Int]  -- ^ List of maximal indices
-winnerTakesAll m = map maxIndex xs
-  where
-    xs = toLists2 m
 
 errors :: Eq lab => [(lab, lab)] -> [(lab, lab)]
 errors = filter (uncurry (/=))
@@ -596,27 +482,6 @@ accuracy tgt pr = 100 * r
     errNo = length $ errors (zip tgt pr)
     r = 1 - fromIntegral errNo / fromIntegral (length tgt)
 {-# SPECIALIZE accuracy :: [Int] -> [Int] -> Float #-}
-
-_accuracy :: NeuralNetwork Float
-  -> (Matrix Float, Matrix Float)
-  -> Float
--- NB: better avoid double conversion to and from one-hot-encoding
-_accuracy net (batch, labelsOneHot) =
-  let batchResults = winnerTakesAll $ forward net batch
-      expected = winnerTakesAll labelsOneHot
-  in accuracy expected batchResults
-
-avgAccuracy
-  :: Monad m
-  => NeuralNetwork Float
-  -> SerialT m (Matrix Float, Matrix Float)
-  -> m Float
-avgAccuracy net stream = s // len
-  where
-    results = S.map (_accuracy net) stream
-    s = S.sum results
-    len = fromIntegral <$> S.length results
-    (//) = liftA2 (/)
 
 -- | Average elements in each column
 mean :: Matrix Float -> Vector Float
