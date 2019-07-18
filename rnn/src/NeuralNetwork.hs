@@ -531,7 +531,7 @@ genWeights (nin, nout) = do
       _genWeights (nin', nout') = scale k <$> randn sz
         where
           sz = Sz (nin' :. nout')
-          k = 0.01
+          k = 0.005
 
       _genBiases n = randn (Sz n)
 
