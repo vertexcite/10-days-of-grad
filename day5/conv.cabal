@@ -44,6 +44,7 @@ executable conv
         base                    >= 4.7  && < 4.13
       , bytestring
       , massiv
+      , massiv-io
       , random
       , streamly
       , mnist-idx
