@@ -21,9 +21,7 @@ writeImageY f a = do
 getStencil :: (Int, Int) -> Array U Ix4 Float -> Stencil Ix2 Float Float
 getStencil ij w0 = makeCorrelationStencilFromKernel (w ij w0)
 
-zeroPadding k (m', n') = makeArray Seq (Sz (m' :. n')) (\ (i :. j) -> if (i < m) && (j < n) then (k A.! (i :. j)) else 0)
-  where
-    Sz (m :. n) = A.size k
+zeroPadding k (m', n') = makeLoadArray Seq (Sz2 m' n') 0 $ \ _ -> iforM_ k
 
 w :: (Int, Int) -> Array U Ix4 Float -> Array U Ix2 Float
 w (i, j) w0 = compute $ w0 !> i !> j
@@ -55,7 +53,7 @@ main = do
   -- First, prepare the 1D kernel
   let k_ = w (0, 0) w0
       -- Zero padding the kernel to a 28x28 matrix:
-      k = zeroPadding k_ (28, 28) :: Array D Ix2 Float
+      k = compute $ zeroPadding k_ (28, 28) :: Matrix Float
       -- Reshape to a 1D array
       k' = A.resize' 784 k
       -- Crop to a new 1D kernel of 28*4 + 5 = 117 first values
