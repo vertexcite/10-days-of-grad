@@ -18,6 +18,28 @@ writeImageY f a = do
   let b = compute $ A.map pure a :: A.Image U Y Float
   A.writeImageAuto f b
 
+maxpoolStencil2x2 :: Stencil Ix2 Float Float
+maxpoolStencil2x2 = makeStencil (Sz2 2 2) 0 $ \ get -> let max4 x1 x2 x3 x4 = max (max (max x1 x2) x3) x4 in max4 <$> get 0 <*> get 1 <*> get (0 :. 1) <*> get (1 :. 0)
+
+maxpool2x2 :: Array U Ix2 Float -> Array U Ix2 Float
+maxpool2x2 = computeWithStride (Stride 2). mapStencil Edge maxpoolStencil2x2
+
+testA :: Array U Ix2 Float
+testA = fromLists' Seq [[1..4],[5..8],[9..12],[13..16]]
+
+-- > testA
+-- Array U Seq (Sz (4 :. 4))
+--   [ [ 1.0, 2.0, 3.0, 4.0 ]
+--   , [ 5.0, 6.0, 7.0, 8.0 ]
+--   , [ 9.0, 10.0, 11.0, 12.0 ]
+--   , [ 13.0, 14.0, 15.0, 16.0 ]
+--   ]
+-- > maxpool2x2 testA
+-- Array U Seq (Sz (2 :. 2))
+--   [ [ 6.0, 8.0 ]
+--   , [ 14.0, 16.0 ]
+--   ]
+
 getStencil :: (Int, Int) -> Array U Ix4 Float -> Stencil Ix2 Float Float
 getStencil ij w0 = makeCorrelationStencilFromKernel (w ij w0)
 
@@ -88,3 +110,19 @@ main = do
   -- writeImageY "0_a.png" im2
 
   return ()
+
+-- > a = computeAs U $ resize' (Sz2 5 5) (Ix1 11 ... 35)
+-- > d = makeArrayR D Seq (Sz2 10 10) (const 0)
+-- > insertWindow d (Window (2 :. 3) (size a) ((a !) . liftIndex2 subtract (2 :. 3)) Nothing)
+-- Array DW Seq (Sz (10 :. 10))
+--   [ [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+--   , [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+--   , [ 0, 0, 0, 11, 12, 13, 14, 15, 0, 0 ]
+--   , [ 0, 0, 0, 16, 17, 18, 19, 20, 0, 0 ]
+--   , [ 0, 0, 0, 21, 22, 23, 24, 25, 0, 0 ]
+--   , [ 0, 0, 0, 26, 27, 28, 29, 30, 0, 0 ]
+--   , [ 0, 0, 0, 31, 32, 33, 34, 35, 0, 0 ]
+--   , [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+--   , [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+--   , [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+--   ]
