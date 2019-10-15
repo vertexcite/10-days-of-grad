@@ -22,7 +22,7 @@ maxpoolStencil2x2 :: Stencil Ix2 Float Float
 maxpoolStencil2x2 = makeStencil (Sz2 2 2) 0 $ \ get -> let max4 x1 x2 x3 x4 = max (max (max x1 x2) x3) x4 in max4 <$> get 0 <*> get 1 <*> get (0 :. 1) <*> get (1 :. 0)
 
 maxpool2x2 :: Array U Ix2 Float -> Array U Ix2 Float
-maxpool2x2 = computeWithStride (Stride 2). mapStencil Edge maxpoolStencil2x2
+maxpool2x2 = computeWithStride (Stride 2). applyStencil maxpoolStencil2x2
 
 testA :: Array U Ix2 Float
 testA = fromLists' Seq [[1..4],[5..8],[9..12],[13..16]]
@@ -77,7 +77,7 @@ main = do
   -- Layer 2:
   -- 2D convolution over all three channels
   let stencils1 = map (makeCorrelationStencilFromKernel. (w1 !>)) [0..2]
-      results1 = map (\s -> compute $ mapStencil Edge s featureMaps) stencils1 :: [Array U Ix3 Float]
+      results1 = map (\s -> compute $ applyStencil s featureMaps) stencils1 :: [Array U Ix3 Float]
       results1' = map (compute. foldrWithin Dim3 (+) 0.0) results1 :: [Array U Ix2 Float]  -- Reduce the last dimension
       results10 = compute $ A.concat' (Dim 3) $ map (resize' (Sz (1 :> 28 :. 28))) results1' :: Array U Ix3 Float
       featureMaps1 = compute $ A.map (max 0.0) results10 :: Array U Ix3 Float

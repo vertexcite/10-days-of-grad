@@ -7,8 +7,11 @@ packages:
 - '.'
 
 extra-deps:
-- massiv-0.4.2.0
-- massiv-io-0.1.7.0
+- git: https://github.com/lehins/massiv
+  commit: f76c706de1d008985f20eb2eef8da4b501a758d8
+  subdirs:
+      - massiv
+      - massiv-io
 - streamly-0.6.1
 
 # Override default flag values for local packages and extra-deps
