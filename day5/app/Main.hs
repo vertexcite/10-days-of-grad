@@ -22,7 +22,7 @@ maxpoolStencil2x2 :: Stencil Ix2 Float Float
 maxpoolStencil2x2 = makeStencil (Sz2 2 2) 0 $ \ get -> let max4 x1 x2 x3 x4 = max (max (max x1 x2) x3) x4 in max4 <$> get 0 <*> get 1 <*> get (0 :. 1) <*> get (1 :. 0)
 
 maxpool2x2 :: Array U Ix2 Float -> Array U Ix2 Float
-maxpool2x2 = computeWithStride (Stride 2). applyStencil maxpoolStencil2x2
+maxpool2x2 = computeWithStride (Stride 2). applyStencil noPadding maxpoolStencil2x2
 
 testA :: Array U Ix2 Float
 testA = fromLists' Seq [[1..4],[5..8],[9..12],[13..16]]
@@ -56,8 +56,8 @@ main = do
   -- 1D identity kernel
   let s = makeCorrelationStencilFromKernel (A.fromList Seq [0, 1, 0] :: Vector Int)
   let delayedS = makeCorrelationStencilFromKernel (A.fromList Seq [1, 0, 0] :: Vector Int)
-  print $ mapStencil Edge s a
-  print (compute $ mapStencil Edge delayedS a :: Vector Int)
+  print $ mapStencil (Fill 0) s a
+  print (compute $ mapStencil (Fill 0) delayedS a :: Vector Int)
   let stride = Stride 3
   print (computeWithStride stride $ mapStencil Edge delayedS a :: Vector Int)
 
@@ -77,37 +77,37 @@ main = do
   -- Layer 2:
   -- 2D convolution over all three channels
   let stencils1 = map (makeCorrelationStencilFromKernel. (w1 !>)) [0..2]
-      results1 = map (\s -> compute $ applyStencil s featureMaps) stencils1 :: [Array U Ix3 Float]
+      results1 = map (\s -> compute $ applyStencil noPadding s featureMaps) stencils1 :: [Array U Ix3 Float]
       results1' = map (compute. foldrWithin Dim3 (+) 0.0) results1 :: [Array U Ix2 Float]  -- Reduce the last dimension
-      results10 = compute $ A.concat' (Dim 3) $ map (resize' (Sz (1 :> 28 :. 28))) results1' :: Array U Ix3 Float
+      results10 = compute $ A.concat' (Dim 3) $ map (resize' (Sz (1 :> 24 :. 24))) results1' :: Array U Ix3 Float
       featureMaps1 = compute $ A.map (max 0.0) results10 :: Array U Ix3 Float
+
+  print featureMaps1
 
   print $ size featureMaps1
   -- Sz (3 :> 28 :. 28)
 
-  print featureMaps1
+  -- Equivalent 1D convolution.
+  -- See Multidimensional convolution via a 1D convolution algorithm
+  -- by Naghizadeh and Sacchi.
+  -- We assume that images are in a smaller 20x20 box, so there is no need for
+  -- additional padding.
+  -- First, prepare the 1D kernel
+  let k_ = w (0, 0) w0
+      -- Zero padding the kernel to a 28x28 matrix:
+      k = compute $ zeroPadding k_ (28, 28) :: Matrix Float
+      -- Reshape to a 1D array
+      k' = A.resize' 784 k
+      -- Crop to a new 1D kernel of 28*4 + 5 = 117 first values
+      k2 = compute $ extractFromTo' 0 117 k' :: Vector Float
 
-  -- -- Equivalent 1D convolution.
-  -- -- See Multidimensional convolution via a 1D convolution algorithm
-  -- -- by Naghizadeh and Sacchi.
-  -- -- We assume that images are in a smaller 20x20 box, so there is no need for
-  -- -- additional padding.
-  -- -- First, prepare the 1D kernel
-  -- let k_ = w (0, 0) w0
-  --     -- Zero padding the kernel to a 28x28 matrix:
-  --     k = compute $ zeroPadding k_ (28, 28) :: Matrix Float
-  --     -- Reshape to a 1D array
-  --     k' = A.resize' 784 k
-  --     -- Crop to a new 1D kernel of 28*4 + 5 = 117 first values
-  --     k2 = compute $ extractFromTo' 0 117 k' :: Vector Float
-  --
-  -- -- Second, reshape the image
-  -- let im' = compute $ A.resize' 784 im :: Vector Float
-  --
-  -- -- Third, run the 1D convolution and reshape back
-  -- let c = compute $ mapStencil Edge (makeCorrelationStencilFromKernel k2) im' :: Vector Float
-  --     im2 = A.resize' (Sz (28 :. 28)) c
-  -- writeImageY "0_a.png" im2
+  -- Second, reshape the image
+  let im' = compute $ A.resize' 784 im :: Vector Float
+
+  -- Third, run the 1D convolution and reshape back
+  let c = compute $ mapStencil Edge (makeCorrelationStencilFromKernel k2) im' :: Vector Float
+      im2 = A.resize' (Sz (28 :. 28)) c
+  writeImageY "0_a.png" im2
 
   return ()
 

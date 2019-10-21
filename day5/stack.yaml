@@ -8,7 +8,7 @@ packages:
 
 extra-deps:
 - git: https://github.com/lehins/massiv
-  commit: f76c706de1d008985f20eb2eef8da4b501a758d8
+  commit: 52ace08c243a6d61fa85304bbccaf1480863cf5d
   subdirs:
       - massiv
       - massiv-io
