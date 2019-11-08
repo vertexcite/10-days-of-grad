@@ -43,10 +43,11 @@ testA = fromLists' Seq [[1..4],[5..8],[9..12],[13..16]]
 relu :: Array U Ix3 Float -> Array U Ix3 Float
 relu = compute. A.map (max 0.0)
 
-conv2d :: Array U Ix4 Float
-       -> Padding Ix3 Float
-       -> Array U Ix3 Float
-       -> Array U Ix3 Float
+-- | 2D convolution
+conv2d :: Array U Ix4 Float  -- ^ Weights
+       -> Padding Ix3 Float  -- ^ Padding
+       -> Array U Ix3 Float  -- ^ Input features
+       -> Array U Ix3 Float  -- ^ Output features
 conv2d w padding x = compute $ A.concat' (Dim 3) results
   where
     (Sz (cout :> cin :> _ :. _)) = size w
