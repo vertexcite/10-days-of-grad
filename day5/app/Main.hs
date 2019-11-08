@@ -55,6 +55,7 @@ conv2d w padding x = compute $ A.concat' (Dim 3) results
     results :: [Array U Ix3 Float]
     results = map (\s -> compute $ applyStencil padding s x) stencils
 
+infixl 9 ~>
 (~>) :: (a -> b) -> (b -> c) -> a -> c
 f ~> g = g. f
 
