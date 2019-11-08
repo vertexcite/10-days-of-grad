@@ -40,16 +40,40 @@ testA = fromLists' Seq [[1..4],[5..8],[9..12],[13..16]]
 --   , [ 14.0, 16.0 ]
 --   ]
 
-getStencil :: (Int, Int) -> Array U Ix4 Float -> Stencil Ix2 Float Float
-getStencil ij w0 = makeCorrelationStencilFromKernel (w ij w0)
+relu :: Array U Ix3 Float -> Array U Ix3 Float
+relu = compute. A.map (max 0.0)
 
-zeroPadding (m', n') = compute. applyStencil (Padding (Sz2 0 0) (Sz2 m' n') (Fill 0)) idStencil
+conv2d :: Array U Ix4 Float
+       -> Padding Ix3 Float
+       -> Array U Ix3 Float
+       -> Array U Ix3 Float
+conv2d w padding x = compute $ A.concat' (Dim 3) results
+  where
+    (Sz (cout :> cin :> _ :. _)) = size w
+    stencils = map (makeCorrelationStencilFromKernel. (w !>)) [0..cout - 1]
+    results :: [Array U Ix3 Float]
+    results = map (\s -> compute $ applyStencil padding s x) stencils
 
-w :: (Int, Int) -> Array U Ix4 Float -> Array U Ix2 Float
-w (i, j) w0 = compute $ w0 !> i !> j
+(~>) :: (a -> b) -> (b -> c) -> a -> c
+f ~> g = g. f
 
-main :: IO ()
-main = do
+testLeNet :: IO ()
+testLeNet = do
+  -- By convention, the first dimension is channels
+  let im1channel = resize' (Sz (1 :> 28 :. 28)) im
+      lenetFeatures = conv2d w0 (Padding (Sz3 0 2 2) (Sz3 0 2 2) (Fill 0.0))
+                    ~> relu
+                    ~> conv2d w1 noPadding
+                    ~> relu
+      featureMaps2 = lenetFeatures im1channel
+
+  print $ size featureMaps2
+  -- Sz (3 :> 24 :. 24)
+
+  -- mapM_ (\(i, result) ->  writeImageY (show i ++ ".png") result) $ zipWith (,) [0..]  (splitChannels featureMaps2)
+
+testConv1D :: IO ()
+testConv1D = do
   let a = A.fromList Seq [1,2,5,6,2,-1,3,-2] :: Vector Int
   print a
 
@@ -61,55 +85,40 @@ main = do
   let stride = Stride 3
   print (computeWithStride stride $ mapStencil Edge delayedS a :: Vector Int)
 
-  -- Layer 1:
-  -- 2D convolution
-  let stencils = [getStencil (0, 0) w0, getStencil (1, 0) w0, getStencil (2, 0) w0]
-      results = map (\s -> compute $ mapStencil Edge s im) stencils :: [Array U Ix2 Float]
-      results0 = compute $ A.concat' (Dim 3) $ map (resize' (Sz (1 :> 28 :. 28))) results :: Array U Ix3 Float
-      -- ReLU
-      featureMaps = compute $ A.map (max 0.0) results0 :: Array U Ix3 Float
+main :: IO ()
+main = putStrLn "Test 1D convolutions" >> testConv1D
+       >> putStrLn "Test 2D convolutions" >> testLeNet
 
-  -- TODO: pooling
-
-  -- print $ size featureMaps
-  -- mapM_ (\(i, result) ->  writeImageY (show i ++ ".png") result) $ zipWith (,) [0..] results
-
-  -- Layer 2:
-  -- 2D convolution over all three channels
-  let stencils1 = map (makeCorrelationStencilFromKernel. (w1 !>)) [0..2]
-      results1 = map (\s -> compute $ applyStencil noPadding s featureMaps) stencils1 :: [Array U Ix3 Float]
-      results1' = map (compute. foldrWithin Dim3 (+) 0.0) results1 :: [Array U Ix2 Float]  -- Reduce the last dimension
-      results10 = compute $ A.concat' (Dim 3) $ map (resize' (Sz (1 :> 24 :. 24))) results1' :: Array U Ix3 Float
-      featureMaps1 = compute $ A.map (max 0.0) results10 :: Array U Ix3 Float
-
-  print featureMaps1
-
-  print $ size featureMaps1
-  -- Sz (3 :> 28 :. 28)
-
-  -- Equivalent 1D convolution.
-  -- See Multidimensional convolution via a 1D convolution algorithm
-  -- by Naghizadeh and Sacchi.
-  -- We assume that images are in a smaller 20x20 box, so there is no need for
-  -- additional padding.
-  -- First, prepare the 1D kernel
-  let k_ = w (0, 0) w0
-      -- Zero padding the kernel to a 28x28 matrix:
-      k = zeroPadding (23, 23) k_ :: Matrix Float
-      -- Reshape to a 1D array
-      k' = A.resize' 784 k
-      -- Crop to a new 1D kernel of 28*4 + 5 = 117 first values
-      k2 = compute $ extractFromTo' 0 117 k' :: Vector Float
-
-  -- Second, reshape the image
-  let im' = compute $ A.resize' 784 im :: Vector Float
-
-  -- Third, run the 1D convolution and reshape back
-  let c = compute $ mapStencil Edge (makeCorrelationStencilFromKernel k2) im' :: Vector Float
-      im2 = A.resize' (Sz (28 :. 28)) c
-  writeImageY "0_a.png" im2
-
-  return ()
+-- zeroPadding (m', n') = compute. applyStencil (Padding (Sz2 0 0) (Sz2 m' n') (Fill 0)) idStencil
+--
+-- test2Dto1D = do
+--   -- 1D convolution equivalent to 2D:
+--   -- (1) Append zeros to make both kernel and image square matrices.
+--   -- (2) Flatten both.
+--   -- (3) Reject zero tails.
+--   -- See Multidimensional convolution via a 1D convolution algorithm
+--   -- by Naghizadeh and Sacchi.
+--
+--   -- Here we assume that images are in a smaller 20x20 box, so there is no need for
+--   -- additional padding.
+--   -- First, prepare the 1D kernel
+--   let k_ = w (0, 0) w0
+--       -- Zero padding the kernel to a 28x28 matrix:
+--       k = zeroPadding (23, 23) k_ :: Matrix Float
+--       -- Reshape to a 1D array
+--       k' = A.resize' 784 k
+--       -- Crop to a new 1D kernel of 28*4 + 5 = 117 first values
+--       k2 = compute $ extractFromTo' 0 117 k' :: Vector Float
+--
+--   -- Second, reshape the image
+--   let im' = compute $ A.resize' 784 im :: Vector Float
+--
+--   -- Third, run the 1D convolution and reshape back
+--   let c = compute $ mapStencil Edge (makeCorrelationStencilFromKernel k2) im' :: Vector Float
+--       im2 = A.resize' (Sz (28 :. 28)) c
+--   writeImageY "0_a.png" im2
+--
+--   return ()
 
 -- > a = computeAs U $ resize' (Sz2 5 5) (Ix1 11 ... 35)
 -- > d = makeArrayR D Seq (Sz2 10 10) (const 0)
