@@ -1,6 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DataKinds #-}
 
+
+
 import           Data.Massiv.Array hiding ( map, zip, unzip, zipWith, mapM_ )
 import qualified Data.Massiv.Array as A
 import qualified Data.Massiv.Array.IO as A
@@ -39,9 +41,6 @@ testA = fromLists' Seq [[1..4],[5..8],[9..12],[13..16]]
 --   [ [ 6.0, 8.0 ]
 --   , [ 14.0, 16.0 ]
 --   ]
-
-relu :: Array U Ix3 Float -> Array U Ix3 Float
-relu = compute. A.map (max 0.0)
 
 -- | 2D convolution
 conv2d :: Array U Ix4 Float  -- ^ Weights
