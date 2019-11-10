@@ -152,9 +152,9 @@ rand rng sz = do
   return $ randomishArray rng g sz
 
 -- | Random values from the Normal distribution
--- randn
---   :: (Fractional e, Index ix, Resize r Ix1, Mutable r Ix1 e)
---   => Sz ix -> IO (Array r ix e)
+randn
+  :: (Fractional e, Index ix, Resize r Ix1, Mutable r Ix1 e)
+  => Sz ix -> IO (Array r ix e)
 randn sz = do
     g <- createSystemRandom
     xs <- _nv g (totalElem sz)
@@ -172,11 +172,6 @@ cols :: Matrix Float -> Int
 cols m =
   let (_ :. c) = unSz $ size m
   in c
-
--- _scale = (*.)
-
--- scale :: Index sz => Float -> Array U sz Float -> Array U sz Float
--- scale konst = computeMap (* konst)
 
 computeMap :: (Source r2 ix e', Mutable r1 ix e) =>
   (e' -> e) -> Array r2 ix e' -> Array r1 ix e
