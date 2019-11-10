@@ -50,12 +50,13 @@ import qualified Data.Massiv.Array as A
 import           Streamly
 import qualified Streamly.Prelude as S
 
--- Note that images are volumes of channels x width x height,
--- whereas convolutional filters are volumes of
--- out channels x in channels x kernel width x kernel height
+-- Note that images are volumes of channels x width x height, whereas
+-- mini-batches are volumes-4 of batch size x channels x width x height.
+-- Similarly, convolutional filter weights are volumes-4 of
+-- out channels x in channels x kernel width x kernel height.
 type Vector a = Array U Ix1 a
 type Matrix a = Array U Ix2 a
-type Volume a = Array U Ix3 a
+-- type Volume a = Array U Ix3 a
 type Volume4 a = Array U Ix4 a
 
 -- Activation function symbols:
@@ -69,6 +70,9 @@ data Layer a = Linear (Matrix a) (Vector a)
                | Conv2d (Volume4 a)
                | Activation FActivation
 
+-- The main difference from the previous NeuralNetwork type
+-- is that the network input is a volume, not a vector
+-- (or volume-4, not matrix when in a batch)
 type ConvNet a = [Layer a]
 
 data Gradients a = -- Weight and bias gradients
@@ -202,7 +206,7 @@ bias' dY = compute $ m *. (_sumRows $ delay dY)
 -- exploit Haskell lazyness to never compute the
 -- gradients.
 forward
-  :: ConvNet Float -> Volume Float -> Matrix Float
+  :: ConvNet Float -> Volume4 Float -> Matrix Float
 forward net dta = fst $ pass Eval net (dta, undefined)
 
 softmax :: Matrix Float -> Matrix Float
@@ -218,7 +222,7 @@ pass
   -- ^ `Train` or `Eval`
   -> ConvNet Float
   -- ^ `ConvNet` `Layer`s: weights and activations
-  -> (Volume Float, Matrix Float)
+  -> (Volume4 Float, Matrix Float)
   -- ^ Mini-batch with labels
   -> (Matrix Float, [Gradients Float])
   -- ^ NN computation from forward pass and weights gradients
@@ -252,7 +256,7 @@ sgd :: Monad m
   -- ^ No of iterations
   -> ConvNet Float
   -- ^ Neural network
-  -> SerialT m (Volume Float, Matrix Float)
+  -> SerialT m (Volume4 Float, Matrix Float)
   -- ^ Data stream
   -> m (ConvNet Float)
 sgd lr n net0 dataStream = iterN n epochStep net0
@@ -260,7 +264,7 @@ sgd lr n net0 dataStream = iterN n epochStep net0
     epochStep net = S.foldl' g net dataStream
 
     g :: ConvNet Float
-      -> (Volume Float, Matrix Float)
+      -> (Volume4 Float, Matrix Float)
       -> ConvNet Float
     g net dta =
       let (_, dW) = pass Train net dta
@@ -335,7 +339,7 @@ accuracy tgt pr = 100 * r
 {-# SPECIALIZE accuracy :: [Int] -> [Int] -> Float #-}
 
 _accuracy :: ConvNet Float
-  -> (Volume Float, Matrix Float)
+  -> (Volume4 Float, Matrix Float)
   -> Float
 -- NB: better avoid double conversion to and from one-hot-encoding
 _accuracy net (batch, labelsOneHot) =
@@ -346,7 +350,7 @@ _accuracy net (batch, labelsOneHot) =
 avgAccuracy
   :: Monad m
   => ConvNet Float
-  -> SerialT m (Volume Float, Matrix Float)
+  -> SerialT m (Volume4 Float, Matrix Float)
   -> m Float
 avgAccuracy net stream = s // len
   where
