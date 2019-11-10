@@ -115,11 +115,11 @@ sigmoid' x dY =
       y = sigmoid x
       y' = delay y
 
-      -- compute $ dY .*. y .*. (ones .-. y)
-      e1 = maybe (error "Inconsistent dimensions#1") id (ones .-. y')
-      e2 = maybe (error "Inconsistent dimensions#2") id (y' .*. e1)
-      e3 = maybe (error "Inconsistent dimensions#3") compute (delay dY .*. e1)
-  in e3
+  -- compute dY * y * (ones - y)
+  in either throw compute $ do
+      e1 <- ones .-. y'
+      e2 <- y' .*. e1
+      delay dY .*. e2
 
 relu :: Index ix => Array U ix Float -> Array U ix Float
 relu = computeMap (max 0.0)
