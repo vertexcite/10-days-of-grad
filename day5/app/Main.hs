@@ -20,26 +20,28 @@ writeImageY f a = do
   let b = compute $ A.map pure a :: A.Image U Y Float
   A.writeImageAuto f b
 
-maxpoolStencil2x2 :: Stencil Ix2 Float Float
-maxpoolStencil2x2 = makeStencil (Sz2 2 2) 0 $ \ get -> let max4 x1 x2 x3 x4 = max (max (max x1 x2) x3) x4 in max4 <$> get 0 <*> get 1 <*> get (0 :. 1) <*> get (1 :. 0)
+maxpoolStencil2x2 :: Stencil Ix3 Float Float
+maxpoolStencil2x2 = makeStencil (Sz3 1 2 2) 0 $ \ get -> let max4 x1 x2 x3 x4 = max (max (max x1 x2) x3) x4 in max4 <$> get (0 :> 0 :. 0) <*> get (0 :> 1 :. 1) <*> get (0 :> 0 :. 1) <*> get (0 :> 1 :. 0)
 
-maxpool2x2 :: Array U Ix2 Float -> Array U Ix2 Float
-maxpool2x2 = computeWithStride (Stride 2). applyStencil noPadding maxpoolStencil2x2
+maxpool2 :: Array U Ix3 Float -> Array U Ix3 Float
+maxpool2 = computeWithStride (Stride (1 :> 2 :. 2)). applyStencil noPadding maxpoolStencil2x2
 
-testA :: Array U Ix2 Float
-testA = fromLists' Seq [[1..4],[5..8],[9..12],[13..16]]
+testA :: Array U Ix3 Float
+testA = fromLists' Seq [[[1..4],[5..8],[9..12],[13..16]]]
 
 -- > testA
--- Array U Seq (Sz (4 :. 4))
---   [ [ 1.0, 2.0, 3.0, 4.0 ]
---   , [ 5.0, 6.0, 7.0, 8.0 ]
---   , [ 9.0, 10.0, 11.0, 12.0 ]
---   , [ 13.0, 14.0, 15.0, 16.0 ]
+-- Array U Seq (Sz (1 :> 4 :. 4))
+--   [ [ [ 1.0, 2.0, 3.0, 4.0 ]
+--     , [ 5.0, 6.0, 7.0, 8.0 ]
+--     , [ 9.0, 10.0, 11.0, 12.0 ]
+--     , [ 13.0, 14.0, 15.0, 16.0 ]
+--     ]
 --   ]
--- > maxpool2x2 testA
--- Array U Seq (Sz (2 :. 2))
---   [ [ 6.0, 8.0 ]
---   , [ 14.0, 16.0 ]
+-- > maxpool2 testA
+-- Array U Seq (Sz (1 :> 2 :. 2))
+--   [ [ [ 6.0, 8.0 ]
+--     , [ 14.0, 16.0 ]
+--     ]
 --   ]
 
 -- | 2D convolution
@@ -64,12 +66,14 @@ testLeNet = do
   let im1channel = resize' (Sz (1 :> 28 :. 28)) im
       lenetFeatures = conv2d w0 (Padding (Sz3 0 2 2) (Sz3 0 2 2) (Fill 0.0))
                     ~> relu
+                    ~> maxpool2
                     ~> conv2d w1 noPadding
                     ~> relu
+                    ~> maxpool2
       featureMaps2 = lenetFeatures im1channel
 
   print $ size featureMaps2
-  -- Sz (3 :> 24 :. 24)
+  -- Sz (3 :> 5 :. 5)
 
   -- mapM_ (\(i, result) ->  writeImageY (show i ++ ".png") result) $ zipWith (,) [0..]  (splitChannels featureMaps2)
 
