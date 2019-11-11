@@ -27,6 +27,7 @@ library
       , streamly
       , MonadRandom
       , array
+      , backprop
 
   hs-source-dirs:
       src

@@ -110,19 +110,7 @@ main = do
   (w2, b2) <- genWeights (h1, h2)
   (w3, b3) <- genWeights (h2, o)
 
-  let net = [ Conv2d undefined
-            , Activation Relu
-            , MaxPool
-            , Conv2d undefined
-            , Activation Relu
-            , MaxPool
-            , Flatten
-            , Linear w1 b1
-            , Activation Relu
-            , Linear w2 b2
-            , Activation Relu
-            , Linear w3 b3
-            ]
+  let net = undefined
 
   net' <- train TrainSettings { _printEpochs = 1
                               , _lr = 0.1
@@ -160,6 +148,7 @@ testA = fromLists' Seq [[[1..4],[5..8],[9..12],[13..16]]]
 --     ]
 --   ]
 
+{-
 -- | 2D convolution
 conv2d :: Array U Ix4 Float  -- ^ Weights
        -> Padding Ix3 Float  -- ^ Padding
@@ -171,6 +160,7 @@ conv2d w padding x = compute $ A.concat' (Dim 3) results
     stencils = map (makeCorrelationStencilFromKernel. (w !>)) [0..cout - 1]
     results :: [Array U Ix3 Float]
     results = map (\s -> compute $ applyStencil padding s x) stencils
+-}
 
 infixl 9 ~>
 (~>) :: (a -> b) -> (b -> c) -> a -> c
@@ -178,6 +168,8 @@ f ~> g = g. f
 {-# INLINE (~>) #-}
 
 lenetFeatures :: Array U Ix3 Float -> Array U Ix1 Float
+lenetFeatures = undefined
+{-
 lenetFeatures = conv2d w0 (Padding (Sz3 0 2 2) (Sz3 0 2 2) (Fill 0.0))
               ~> relu
               ~> maxpool2
@@ -185,6 +177,7 @@ lenetFeatures = conv2d w0 (Padding (Sz3 0 2 2) (Sz3 0 2 2) (Fill 0.0))
               ~> relu
               ~> maxpool2
               ~> resize' (Sz (3 * 5 * 5))
+-}
 
 testLeNet :: IO ()
 testLeNet = do

@@ -5,18 +5,21 @@
 
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module NeuralNetwork
   ( ConvNet
   , Layer (..)
   , Vector
   , Matrix
+  , Volume
   , Volume4
-  , FActivation (..)
   , sigmoid
-  , sigmoid'
   , relu
-  , relu'
+  , conv2d
+  , maxpool
+  , NeuralNetwork.flatten
+  , linear
   , genWeights
   , forward
 
@@ -50,6 +53,7 @@ import           Data.Massiv.Array hiding ( map, zip, zipWith )
 import qualified Data.Massiv.Array as A
 import           Streamly
 import qualified Streamly.Prelude as S
+import           Numeric.Backprop
 
 -- Note that images are volumes of channels x width x height, whereas
 -- mini-batches are volumes-4 of batch size x channels x width x height.
@@ -57,88 +61,113 @@ import qualified Streamly.Prelude as S
 -- out channels x in channels x kernel width x kernel height.
 type Vector a = Array U Ix1 a
 type Matrix a = Array U Ix2 a
--- type Volume a = Array U Ix3 a
+type Volume a = Array U Ix3 a
 type Volume4 a = Array U Ix4 a
 
--- Activation function symbols:
--- * Rectified linear unit (ReLU)
--- * Sigmoid
--- * Identity (no activation)
-data FActivation = Relu | Sigmoid | Id
+-- Cross-correlation
+conv2d_ :: Padding Ix3 Float  -- ^ Padding
+        -> Stride Ix3
+        -> Array U Ix4 Float  -- ^ Weights
+        -> Array U Ix3 Float  -- ^ Input features
+        -> Array U Ix3 Float  -- ^ Output features
+conv2d_ padding stride w x = compute $ A.concat' (Dim 3) results
+  where
+    (Sz (cout :> cin :> _ :. _)) = size w
+    stencils = map (makeCorrelationStencilFromKernel. (w !>)) [0..cout - 1]
+    results :: [Array U Ix3 Float]
+    results = map (\s -> computeWithStride stride $ applyStencil padding s x) stencils
 
--- ConvNet layers
-data Layer a = Linear (Matrix a) (Vector a)
-               | Conv2d (Volume4 a)
-               | Activation FActivation
-               -- In a more general case, pooling layer
-               -- would be parametrizable with kernel/stride size
-               | MaxPool
-               -- Reshapes the output of conv layers
-               | Flatten
+-- Actual convolution
+conv2d__ :: Padding Ix3 Float  -- ^ Padding
+        -> Stride Ix3
+        -> Array U Ix4 Float  -- ^ Weights
+        -> Array U Ix3 Float  -- ^ Input features
+        -> Array U Ix3 Float  -- ^ Output features
+conv2d__ padding stride w x = compute $ A.concat' (Dim 3) results
+  where
+    (Sz (cout :> cin :> _ :. _)) = size w
+    stencils = map (makeConvolutionStencilFromKernel. (w !>)) [0..cout - 1]
+    results :: [Array U Ix3 Float]
+    results = map (\s -> computeWithStride stride $ applyStencil padding s x) stencils
 
--- The main difference from the previous NeuralNetwork type
--- is that the network input is a volume, not a vector
--- (or volume-4, not matrix when in a batch)
-type ConvNet a = [Layer a]
+-- TODO: work on Volume4 mini-batches
+-- | 2D convolution with derivatives
+conv2d :: Reifies s W
+       => Padding Ix3 Float
+       -> Stride Ix3
+       -> BVar s (Volume4 Float)
+       -> BVar s (Volume Float)
+       -> BVar s (Volume Float)
+conv2d p s = liftOp2. op2 $ \w x ->
+  (conv2d_ p s w x, \dz -> let dw = undefined
+                               dx = undefined
+                            in (dw, dx) )
 
-data Gradients a = -- Weight and bias gradients
-                   LinearGradients (Matrix a) (Vector a)
-                   -- Conv 2D gradients (no biases, but could be)
-                   | Conv2dGradients (Volume4 a)
-                   | NoGrad  -- No learnable parameters
+instance (Index ix, Num e, Unbox e) => Backprop (Array U ix e) where
+    zero x = A.replicate Par (size x) 0
+    add x y = maybe (error "Dimension mismatch") compute (delay x .+. delay y)
+    one x = A.replicate Par (size x) 1
 
--- | A neural network may work differently in training and evaluation modes
-data Phase = Train | Eval deriving (Show, Eq)
+-- TODO: refactor to a composition of
+-- new differentiable |*| and .+. operators
+linear :: Reifies s W
+       => BVar s (Matrix Float)
+       -> BVar s (Vector Float)
+       -> BVar s (Matrix Float)
+       -> BVar s (Matrix Float)
+linear = liftOp3. op3 $ \w b x ->
+  let prod = maybe (error "Dimension mismatch") id (x |*| w)
+      lin = maybe (error "Dimension mismatch") compute (delay prod .+. (b `rowsLike` x))
+  in (lin, \dZ -> let dW = linearW' x dZ
+                      dB = bias' dZ
+                      dX = linearX' w dZ
+                  in (dW, dB, dX)
+     )
 
--- | Lookup activation function by a symbol
-getActivation :: FActivation -> (Matrix Float -> Matrix Float)
-getActivation Id = id
-getActivation Sigmoid = sigmoid
-getActivation Relu = relu
+relu :: (Reifies s W, Index ix)
+        => BVar s (Array U ix Float)
+        -> BVar s (Array U ix Float)
+relu = liftOp1. op1 $ \x ->
+  (computeMap (max 0.0) x, \dY ->
+    let f x0 dy0 = if x0 <= 0
+                      then 0
+                      else dy0
+     in compute $ A.zipWith f x dY)
 
--- | Lookup activation function derivative by a symbol
-getActivation'
-  :: FActivation
-  -> (Matrix Float -> Matrix Float -> Matrix Float)
-getActivation' Id = flip const
-getActivation' Sigmoid = sigmoid'
-getActivation' Relu = relu'
-
--- | Elementwise sigmoid computation
-sigmoid :: Index ix => Array U ix Float -> Array U ix Float
-sigmoid = computeMap f
+-- | Elementwise sigmoid and its derivative
+sigmoid :: forall s ix. (Reifies s W, Index ix)
+        => BVar s (Array U ix Float)
+        -> BVar s (Array U ix Float)
+sigmoid = liftOp1. op1 $ \x ->
+    let y = computeMap f x
+    in (y, \dY ->
+        let ones = delay $ one x
+            y' = delay y
+        in either throw compute $ do
+            e1 <- ones .-. y'
+            e2 <- y' .*. e1
+            delay dY .*. e2
+       )
   where
     f x = recip $ 1.0 + exp (-x)
 
--- | Compute sigmoid gradients
-sigmoid' :: forall ix. Index ix
-         => Array U ix Float
-         -> Array U ix Float
-         -> Array U ix Float
-sigmoid' x dY =
-  let sz = size x
-      ones = A.replicate Par sz 1.0 :: Array D ix Float
-      y = sigmoid x
-      y' = delay y
+-- TODO: operate on Volume4 mini-batches
+maxpool = undefined
 
-  -- compute dY * y * (ones - y)
-  in either throw compute $ do
-      e1 <- ones .-. y'
-      e2 <- y' .*. e1
-      delay dY .*. e2
+flatten :: Reifies s W
+        => BVar s (Volume4 Float)
+        -> BVar s (Matrix Float)
+flatten = liftOp1. op1 $ \x ->
+  let sz0@(Sz (bs :> ch :> h :. w)) = size x
+      sz = Sz2 bs (ch * h * w)
+   in (resize' sz x, \dz -> resize' sz0 dz)
 
-relu :: Index ix => Array U ix Float -> Array U ix Float
-relu = computeMap (max 0.0)
+data Layer a = Layer a
+type ConvNet a = [Layer a]
+data Grad a = Grad a
 
-relu' :: Index ix
-      => Array U ix Float
-      -> Array U ix Float
-      -> Array U ix Float
-relu' x = compute. A.zipWith f x
-  where
-    f x0 dy0 = if x0 <= 0
-                  then 0
-                  else dy0
+-- | A neural network may work differently in training and evaluation modes
+data Phase = Train | Eval deriving (Show, Eq)
 
 randomishArray
   :: (Mutable r ix e, R.RandomGen a, R.Random e) =>
@@ -225,9 +254,9 @@ pass
   -- ^ `ConvNet` `Layer`s: weights and activations
   -> (Volume4 Float, Matrix Float)
   -- ^ Mini-batch with labels
-  -> (Matrix Float, [Gradients Float])
-  -- ^ NN computation from forward pass and weights gradients
-pass phase net (x, tgt) = undefined -- (pred, grads)
+  -> (Matrix Float, [Grad Float])
+  -- ^ NN computation from forward pass and weight gradients
+pass = undefined
 
 -- | Broadcast a vector in Dim2
 rowsLike :: Manifest r Ix1 Float
@@ -260,31 +289,32 @@ sgd :: Monad m
   -> SerialT m (Volume4 Float, Matrix Float)
   -- ^ Data stream
   -> m (ConvNet Float)
-sgd lr n net0 dataStream = iterN n epochStep net0
-  where
-    epochStep net = S.foldl' g net dataStream
-
-    g :: ConvNet Float
-      -> (Volume4 Float, Matrix Float)
-      -> ConvNet Float
-    g net dta =
-      let (_, dW) = pass Train net dta
-      in (zipWith f net dW)
-
-    f :: Layer Float -> Gradients Float -> Layer Float
-
-    -- Update Linear layer weights
-    f (Linear w b) (LinearGradients dW dB) =
-      let w1 = subtractGradMaybe lr w dW
-          b1 = subtractGradMaybe lr b dB
-      in Linear w1 b1
-
-    f (Conv2d w) (Conv2dGradients dW) = Conv2d (subtractGradMaybe lr w dW)
-
-    -- No parameters to change
-    f layer NoGrad = layer
-
-    f _ _ = error "Layer/gradients mismatch"
+sgd lr n net0 dataStream = undefined
+-- sgd lr n net0 dataStream = iterN n epochStep net0
+--   where
+--     epochStep net = S.foldl' g net dataStream
+--
+--     g :: ConvNet Float
+--       -> (Volume4 Float, Matrix Float)
+--       -> ConvNet Float
+--     g net dta =
+--       let (_, dW) = pass Train net dta
+--       in (zipWith f net dW)
+--
+--     f :: Layer Float -> Grad Float -> Layer Float
+--
+--     -- Update Linear layer weights
+--     f (Linear w b) (LinearGrad dW dB) =
+--       let w1 = subtractGradMaybe lr w dW
+--           b1 = subtractGradMaybe lr b dB
+--       in Linear w1 b1
+--
+--     f (Conv2d w) (Conv2dGrad dW) = Conv2d (subtractGradMaybe lr w dW)
+--
+--     -- No parameters to change
+--     f layer NoGrad = layer
+--
+--     f _ _ = error "Layer/gradients mismatch"
 
 subtractGrad
   :: (Num e, MonadThrow m, Source r1 ix e, Source r2 ix e) =>
@@ -367,6 +397,3 @@ _sumRows = A.foldlWithin Dim2 (+) 0.0
 -- | Sum values in each row and produce a delayed 1D Array
 _sumCols :: Array D Ix2 Float -> Array D Ix1 Float
 _sumCols = A.foldlWithin Dim1 (+) 0.0
-
--- TODO: modify the demo so that only the forward pass is defined.
--- Then, use `backprop` package for automatic differentiation.
