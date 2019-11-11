@@ -66,10 +66,15 @@ type Volume4 a = Array U Ix4 a
 -- * Identity (no activation)
 data FActivation = Relu | Sigmoid | Id
 
--- Neural network layers: Linear, Conv2d, Activation
+-- ConvNet layers
 data Layer a = Linear (Matrix a) (Vector a)
                | Conv2d (Volume4 a)
                | Activation FActivation
+               -- In a more general case, pooling layer
+               -- would be parametrizable with kernel/stride size
+               | MaxPool
+               -- Reshapes the output of conv layers
+               | Flatten
 
 -- The main difference from the previous NeuralNetwork type
 -- is that the network input is a volume, not a vector
@@ -222,7 +227,7 @@ pass
   -- ^ Mini-batch with labels
   -> (Matrix Float, [Gradients Float])
   -- ^ NN computation from forward pass and weights gradients
-pass = undefined
+pass phase net (x, tgt) = undefined -- (pred, grads)
 
 -- | Broadcast a vector in Dim2
 rowsLike :: Manifest r Ix1 Float

@@ -104,12 +104,20 @@ main = do
   trainS <- mnistStream 1000 "data/train-images-idx3-ubyte" "data/train-labels-idx1-ubyte"
   testS <- mnistStream 1000 "data/t10k-images-idx3-ubyte" "data/t10k-labels-idx1-ubyte"
 
-  let [i, h1, h2, o] = undefined  -- [3 * 5 * 5, 120, 84, 10]
+  -- Linear layers' initial weights
+  let [i, h1, h2, o] = [3 * 5 * 5, 120, 84, 10]
   (w1, b1) <- genWeights (i, h1)
   (w2, b2) <- genWeights (h1, h2)
   (w3, b3) <- genWeights (h2, o)
 
-  let net = [ Linear w1 b1
+  let net = [ Conv2d undefined
+            , Activation Relu
+            , MaxPool
+            , Conv2d undefined
+            , Activation Relu
+            , MaxPool
+            , Flatten
+            , Linear w1 b1
             , Activation Relu
             , Linear w2 b2
             , Activation Relu
