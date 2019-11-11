@@ -9,8 +9,9 @@
 module NeuralNetwork
   ( ConvNet
   , Layer (..)
-  , Matrix
   , Vector
+  , Matrix
+  , Volume4
   , FActivation (..)
   , sigmoid
   , sigmoid'
