@@ -20,6 +20,18 @@ conv2d' padding w x = compute $ A.concat' (Dim 3) results
     results :: [Array U Ix3 Float]
     results = map (\s -> compute $ applyStencil padding s x) stencils
 
+conv2d_
+       :: Padding Ix3 Float  -- ^ Padding
+       -> Array U Ix4 Float  -- ^ Weights
+       -> Array U Ix3 Float  -- ^ Input features
+       -> Array U Ix3 Float  -- ^ Output features
+conv2d_ padding w x = compute $ A.concat' (Dim 3) results
+  where
+    (Sz (cout :> cin :> _ :. _)) = size w
+    stencils = makeCorrelationStencilFromKernel. computeAs U. (w !>) <$> (0 ..: cout)
+    results :: Array D Ix1 (Array U Ix3 Float)
+    results = fmap (\s -> compute $ applyStencil padding s x) stencils
+
 conv2dr
        :: Padding Ix3 Float  -- ^ Padding
        -> Array U Ix4 Float  -- ^ Weights
@@ -63,6 +75,10 @@ main = do
                 (return (resize' (Sz (1 :> 28 :. 28)) im))
                 (bench "Delayed array based, foldr".
                  whnf (computeAs U. conv2dr padding w0))
+            , env
+                (return (resize' (Sz (1 :> 28 :. 28)) im))
+                (bench "No lists at all".
+                 whnf (computeAs U. conv2d_ padding w0))
             , env
                 (return (resize' (Sz (1 :> 28 :. 28)) im))
                 (bench "List based".
