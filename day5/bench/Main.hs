@@ -86,59 +86,58 @@ main = do
     ]
 
 {-
+
 benchmarking Conv2d: no batches (3D)/1 chan -> 3 chan, with padding/Seq
-time                 303.9 μs   (295.0 μs .. 313.5 μs)
-                     0.997 R²   (0.995 R² .. 0.999 R²)
-mean                 299.7 μs   (297.0 μs .. 303.7 μs)
-std dev              10.37 μs   (7.740 μs .. 16.03 μs)
-variance introduced by outliers: 29% (moderately inflated)
+time                 312.5 μs   (310.7 μs .. 315.1 μs)
+                     0.999 R²   (0.999 R² .. 1.000 R²)
+mean                 321.6 μs   (318.5 μs .. 326.8 μs)
+std dev              13.23 μs   (8.305 μs .. 22.30 μs)
+variance introduced by outliers: 37% (moderately inflated)
 
 benchmarking Conv2d: no batches (3D)/1 chan -> 3 chan, with padding/Par
-time                 540.0 μs   (525.8 μs .. 552.6 μs)
-                     0.997 R²   (0.995 R² .. 0.999 R²)
-mean                 521.6 μs   (517.0 μs .. 530.0 μs)
-std dev              18.81 μs   (14.60 μs .. 25.16 μs)
-variance introduced by outliers: 29% (moderately inflated)
+time                 523.9 μs   (513.0 μs .. 537.9 μs)
+                     0.995 R²   (0.991 R² .. 0.999 R²)
+mean                 518.2 μs   (511.9 μs .. 525.7 μs)
+std dev              23.89 μs   (17.99 μs .. 34.36 μs)
+variance introduced by outliers: 40% (moderately inflated)
 
 benchmarking Conv2d: no batches (3D)/3 chan -> 3 chan, no padding/Seq
-time                 619.4 μs   (615.7 μs .. 626.3 μs)
-                     0.998 R²   (0.997 R² .. 1.000 R²)
-mean                 634.0 μs   (628.9 μs .. 641.8 μs)
-std dev              21.83 μs   (13.64 μs .. 32.63 μs)
-variance introduced by outliers: 26% (moderately inflated)
+time                 634.9 μs   (631.3 μs .. 640.7 μs)
+                     1.000 R²   (1.000 R² .. 1.000 R²)
+mean                 651.0 μs   (648.0 μs .. 655.6 μs)
+std dev              12.38 μs   (9.709 μs .. 16.76 μs)
 
 benchmarking Conv2d: no batches (3D)/3 chan -> 3 chan, no padding/Par
-time                 567.3 μs   (524.9 μs .. 597.9 μs)
-                     0.978 R²   (0.968 R² .. 0.988 R²)
-mean                 522.4 μs   (503.8 μs .. 539.9 μs)
-std dev              59.63 μs   (49.88 μs .. 77.02 μs)
-variance introduced by outliers: 81% (severely inflated)
+time                 594.7 μs   (570.1 μs .. 616.9 μs)
+                     0.982 R²   (0.971 R² .. 0.989 R²)
+mean                 534.3 μs   (514.7 μs .. 558.1 μs)
+std dev              73.43 μs   (64.96 μs .. 84.56 μs)
+variance introduced by outliers: 86% (severely inflated)
 
 benchmarking Conv2d: batch size 1 (4D)/1 chan -> 3 chan, with padding/Seq
-time                 1.406 ms   (1.400 ms .. 1.416 ms)
-                     1.000 R²   (0.999 R² .. 1.000 R²)
-mean                 1.447 ms   (1.439 ms .. 1.457 ms)
-std dev              31.20 μs   (25.30 μs .. 38.69 μs)
-variance introduced by outliers: 10% (moderately inflated)
+time                 692.2 μs   (689.7 μs .. 695.3 μs)
+                     1.000 R²   (1.000 R² .. 1.000 R²)
+mean                 703.6 μs   (701.7 μs .. 705.2 μs)
+std dev              6.035 μs   (5.080 μs .. 7.719 μs)
 
 benchmarking Conv2d: batch size 1 (4D)/1 chan -> 3 chan, with padding/Par
-time                 1.579 ms   (1.549 ms .. 1.608 ms)
-                     0.993 R²   (0.987 R² .. 0.997 R²)
-mean                 1.592 ms   (1.568 ms .. 1.629 ms)
-std dev              95.80 μs   (66.75 μs .. 128.5 μs)
-variance introduced by outliers: 45% (moderately inflated)
+time                 989.3 μs   (973.4 μs .. 1.005 ms)
+                     0.997 R²   (0.995 R² .. 0.998 R²)
+mean                 942.8 μs   (929.6 μs .. 962.6 μs)
+std dev              54.01 μs   (47.89 μs .. 61.30 μs)
+variance introduced by outliers: 46% (moderately inflated)
 
 benchmarking Conv2d: batch size 1 (4D)/3 chan -> 3 chan, no padding/Seq
-time                 2.617 ms   (2.552 ms .. 2.709 ms)
-                     0.997 R²   (0.994 R² .. 0.999 R²)
-mean                 2.711 ms   (2.662 ms .. 2.767 ms)
-std dev              171.8 μs   (125.5 μs .. 213.6 μs)
-variance introduced by outliers: 45% (moderately inflated)
+time                 1.248 ms   (1.245 ms .. 1.252 ms)
+                     1.000 R²   (1.000 R² .. 1.000 R²)
+mean                 1.267 ms   (1.262 ms .. 1.285 ms)
+std dev              36.49 μs   (6.083 μs .. 70.13 μs)
+variance introduced by outliers: 17% (moderately inflated)
 
 benchmarking Conv2d: batch size 1 (4D)/3 chan -> 3 chan, no padding/Par
-time                 2.885 ms   (2.803 ms .. 2.959 ms)
-                     0.994 R²   (0.991 R² .. 0.997 R²)
-mean                 2.993 ms   (2.942 ms .. 3.041 ms)
-std dev              168.3 μs   (141.4 μs .. 210.0 μs)
-variance introduced by outliers: 37% (moderately inflated)
+time                 1.705 ms   (1.667 ms .. 1.747 ms)
+                     0.996 R²   (0.993 R² .. 0.998 R²)
+mean                 1.617 ms   (1.595 ms .. 1.641 ms)
+std dev              74.28 μs   (61.64 μs .. 102.5 μs)
+variance introduced by outliers: 33% (moderately inflated)
 -}

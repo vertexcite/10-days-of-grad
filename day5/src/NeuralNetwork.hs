@@ -84,6 +84,7 @@ conv2d_ (Padding (Sz szp1) (Sz szp2) be) w x = compute res
     (Sz (cout :> cin :> x1 :. x2)) = size w
     -- Extract weights, add fake Dim4, and make stencil
     sten = makeCorrelationStencilFromKernel. resize' (Sz4 1 cin x1 x2). (w !>)
+    {-# INLINE sten #-}
     -- Add zeroes in batch and channel dimensions
     pad4 = Padding (Sz (0 :> 0 :> szp1)) (Sz (0 :> 0 :> szp2)) be
     -- Note: we apply stencils on zero channel of *all* images in the batch
