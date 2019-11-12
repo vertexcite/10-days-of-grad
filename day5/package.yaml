@@ -43,3 +43,15 @@ executables:
     - deepseq
     - split
     - conv
+
+benchmarks:
+  default:
+    main: Main.hs
+    source-dirs: bench
+    dependencies:
+    - criterion
+    - conv
+    ghc-options:
+    - -O2
+    - -threaded
+    - -rtsopts

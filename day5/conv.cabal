@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: bee6093511bfbfb6b6b85c7bdcb69826df48a8a36327ee29a3860d430834b69a
+-- hash: 4dcacefa1d02c70ecee59c29c53775ba37302d616416829fa4967e2b33716455
 
 name:           conv
 version:        0.0.0
@@ -59,4 +59,25 @@ executable conv
     , streamly
     , transformers
     , vector
+  default-language: Haskell2010
+
+benchmark default
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  other-modules:
+      Paths_conv
+  hs-source-dirs:
+      bench
+  ghc-options: -O2 -threaded -rtsopts
+  build-depends:
+      MonadRandom
+    , array
+    , backprop
+    , base >=4.7 && <4.13
+    , conv
+    , criterion
+    , massiv >=0.4.3.0 && <0.5
+    , mwc-random
+    , random
+    , streamly
   default-language: Haskell2010

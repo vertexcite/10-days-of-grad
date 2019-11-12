@@ -148,20 +148,6 @@ testA = fromLists' Seq [[[1..4],[5..8],[9..12],[13..16]]]
 --     ]
 --   ]
 
-{-
--- | 2D convolution
-conv2d :: Array U Ix4 Float  -- ^ Weights
-       -> Padding Ix3 Float  -- ^ Padding
-       -> Array U Ix3 Float  -- ^ Input features
-       -> Array U Ix3 Float  -- ^ Output features
-conv2d w padding x = compute $ A.concat' (Dim 3) results
-  where
-    (Sz (cout :> cin :> _ :. _)) = size w
-    stencils = map (makeCorrelationStencilFromKernel. (w !>)) [0..cout - 1]
-    results :: [Array U Ix3 Float]
-    results = map (\s -> compute $ applyStencil padding s x) stencils
--}
-
 infixl 9 ~>
 (~>) :: (a -> b) -> (b -> c) -> a -> c
 f ~> g = g. f
