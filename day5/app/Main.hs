@@ -136,10 +136,10 @@ noPad3 = Padding (Sz3 0 0 0) (Sz3 0 0 0) (Fill 0.0)
 lenetFeatures :: Volume4 Float -> Volume4 Float
 lenetFeatures = conv2d_ (Padding (Sz3 0 2 2) (Sz3 0 2 2) (Fill 0.0)) w0
               ~> relu_
-              ~> maxpool
+              ~> maxpool_
               ~> conv2d_ noPad3 w1
               ~> relu_
-              ~> maxpool
+              ~> maxpool_
 
 testLeNet :: IO ()
 testLeNet = do

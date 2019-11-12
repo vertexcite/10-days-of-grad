@@ -20,6 +20,7 @@ module NeuralNetwork
   , conv2d
   , conv2d_
   , maxpool
+  , maxpool_
   , NeuralNetwork.flatten
   , linear
   , genWeights
@@ -86,8 +87,10 @@ conv2d_ (Padding (Sz szp1) (Sz szp2) be) w x = compute res
     sten = makeCorrelationStencilFromKernel. resize' (Sz4 1 cin x1 x2). (w !>)
     -- Add zero in batch dimension
     pad4 = Padding (Sz (0 :> szp1)) (Sz (0 :> szp2)) be
-    -- Note: we apply stencils on the first channel of all images in the batch
+    -- Note: we apply stencils on zero channel of *all* images in the batch
     base = computeAs U $ applyStencil pad4 (sten 0) x
+    -- Again, stencils are applied simultaneously on all images for a given
+    -- channel
     res = foldl' (\prev ch -> let conv = computeAs U $ applyStencil pad4 (sten ch) x
                               in computeAs U $ append' 3 prev conv) base [1..cout - 1]
 
@@ -156,8 +159,8 @@ sigmoid = liftOp1. op1 $ \x ->
 maxpoolStencil2x2 :: Stencil Ix4 Float Float
 maxpoolStencil2x2 = makeStencil (Sz4 1 1 2 2) 0 $ \ get -> let max4 x1 x2 x3 x4 = max (max (max x1 x2) x3) x4 in max4 <$> get (0 :> 0 :> 0 :. 0) <*> get (0 :> 0 :> 1 :. 1) <*> get (0 :> 0 :> 0 :. 1) <*> get (0 :> 0 :> 1 :. 0)
 
-maxpool :: Volume4 Float -> Volume4 Float
-maxpool = computeWithStride (Stride (1 :> 1 :> 2 :. 2)). applyStencil noPadding maxpoolStencil2x2
+maxpool_ :: Volume4 Float -> Volume4 Float
+maxpool_ = computeWithStride (Stride (1 :> 1 :> 2 :. 2)). applyStencil noPadding maxpoolStencil2x2
 
 -- > testA = fromLists' Seq [[[[1..4],[5..8],[9..12],[13..16]]]] :: Array U Ix4 Float
 --
@@ -170,7 +173,7 @@ maxpool = computeWithStride (Stride (1 :> 1 :> 2 :. 2)). applyStencil noPadding 
 --       ]
 --     ]
 --   ]
--- > maxpool testA
+-- > maxpool_ testA
 -- Array U Seq (Sz (1 :> 1 :> 2 :. 2))
 --   [ [ [ [ 6.0, 8.0 ]
 --       , [ 14.0, 16.0 ]
@@ -189,7 +192,7 @@ maxpool = computeWithStride (Stride (1 :> 1 :> 2 :. 2)). applyStencil noPadding 
 --       ]
 --     ]
 --   ]
--- > maxpool testB
+-- > maxpool_ testB
 -- Array U Seq (Sz (2 :> 1 :> 1 :. 2))
 --   [ [ [ [ 6.0, 8.0 ]
 --       ]
@@ -198,6 +201,11 @@ maxpool = computeWithStride (Stride (1 :> 1 :> 2 :. 2)). applyStencil noPadding 
 --       ]
 --     ]
 --   ]
+
+maxpool :: Reifies s W
+        => BVar s (Volume4 Float)
+        -> BVar s (Volume4 Float)
+maxpool = undefined
 
 flatten :: Reifies s W
         => BVar s (Volume4 Float)
