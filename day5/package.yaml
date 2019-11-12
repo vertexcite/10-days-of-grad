@@ -13,11 +13,11 @@ dependencies:
 - base                    >= 4.7 && < 4.13
 - massiv                  >= 0.4.3.0 && < 0.5
 - mwc-random
-- random
 - streamly
 - MonadRandom
 - array
 - backprop
+# - splitmix
 
 library:
   source-dirs: src

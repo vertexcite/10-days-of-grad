@@ -40,14 +40,13 @@ module NeuralNetwork
   , computeMap
   , rand
   , randn
-  , randomishArray
   , iterN
   , br
   ) where
 
 import           Control.Monad ( replicateM, foldM )
 import           Control.Applicative ( liftA2 )
-import qualified System.Random as R
+import qualified System.Random.MWC as MWC
 import           System.Random.MWC ( createSystemRandom )
 import           System.Random.MWC.Distributions ( standard )
 import           Data.List ( maximumBy )
@@ -222,34 +221,20 @@ data Grad a = Grad a
 -- | A neural network may work differently in training and evaluation modes
 data Phase = Train | Eval deriving (Show, Eq)
 
-randomishArray
-  :: (Mutable r ix e, R.RandomGen a, R.Random e) =>
-     (e, e) -> a -> Sz ix -> Array r ix e
-randomishArray rng g0 sz = compute $ unfoldlS_ sz _rand g0
-  where
-    _rand g =
-      let (a, g') = R.randomR rng g
-      in (g', a)
-
 -- | Uniformly-distributed random numbers Array
 rand
-  :: (R.Random e, Mutable r ix e) =>
+  :: (Mutable r ix e, MWC.Variate e) =>
      (e, e) -> Sz ix -> IO (Array r ix e)
 rand rng sz = do
-  g <- R.newStdGen
-  return $ randomishArray rng g sz
+    gens <- initWorkerStates Par (\_ -> createSystemRandom)
+    randomArrayWS gens sz (MWC.uniformR rng)
 
 -- | Random values from the Normal distribution
-randn
-  :: (Fractional e, Index ix, Resize r Ix1, Mutable r Ix1 e)
-  => Sz ix -> IO (Array r ix e)
+randn :: forall e ix. (Fractional e, Index ix, Unbox e) => Sz ix -> IO (Array U ix e)
 randn sz = do
-    g <- createSystemRandom
-    xs <- _nv g (totalElem sz)
-    return $ resize' sz (fromList Seq xs)
-  where
-    _nv gen n = replicateM n (realToFrac <$> standard gen)
-    {-# INLINE _nv #-}
+    gens <- initWorkerStates Par (\_ -> createSystemRandom)
+    r <- randomArrayWS gens sz standard :: IO (Array P ix Double)
+    return (compute $ A.map realToFrac r)
 
 rows :: Matrix Float -> Int
 rows m =
