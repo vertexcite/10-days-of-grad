@@ -131,13 +131,13 @@ infixl 9 ~>
 f ~> g = g. f
 {-# INLINE (~>) #-}
 
-noPad3 = Padding (Sz3 0 0 0) (Sz3 0 0 0) (Fill 0.0)
+noPad2 = Padding (Sz2 0 0) (Sz2 0 0) (Fill 0.0)
 
 lenetFeatures :: Volume4 Float -> Volume4 Float
-lenetFeatures = conv2d_ (Padding (Sz3 0 2 2) (Sz3 0 2 2) (Fill 0.0)) w0
+lenetFeatures = conv2d_ (Padding (Sz2 2 2) (Sz2 2 2) (Fill 0.0)) w0
               ~> relu_
               ~> maxpool_
-              ~> conv2d_ noPad3 w1
+              ~> conv2d_ noPad2 w1
               ~> relu_
               ~> maxpool_
 
@@ -149,7 +149,7 @@ testLeNet = do
       featureMaps2 = lenetFeatures batch
 
   print $ size featureMaps2
-  -- Sz (3 :> 5 :. 5)
+  -- Sz (2 :> 3 :> 5 :. 5)
 
   -- mapM_ (\(i, result) ->  writeImageY (show i ++ ".png") result) $ zipWith (,) [0..]  (splitChannels featureMaps2)
 

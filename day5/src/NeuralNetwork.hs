@@ -70,13 +70,13 @@ type Volume4 a = Array U Ix4 a
 
 -- | 2D convolution that operates on a batch.
 --
--- Padding is Ix3 because an image in a batch is Ix3.
+-- Padding is Ix2 because it is performed only w.r.t. width and height.
 --
 -- The stride is assumed to be 1, but this can be extended
 -- in a straightforward manner with `computeWithStride`.
--- Do not forget to use stride 1 in the batch dimension (Dim4).
+-- Do not forget to use strides 1 in batch and channel dimensions (Dim4, Dim3).
 conv2d_
-       :: Padding Ix3 Float  -- ^ Padding
+       :: Padding Ix2 Float  -- ^ Image plane padding
        -> Volume4 Float  -- ^ Weights
        -> Volume4 Float  -- ^ Batch of input features
        -> Volume4 Float  -- ^ Output features
@@ -85,8 +85,8 @@ conv2d_ (Padding (Sz szp1) (Sz szp2) be) w x = compute res
     (Sz (cout :> cin :> x1 :. x2)) = size w
     -- Extract weights, add fake Dim4, and make stencil
     sten = makeCorrelationStencilFromKernel. resize' (Sz4 1 cin x1 x2). (w !>)
-    -- Add zero in batch dimension
-    pad4 = Padding (Sz (0 :> szp1)) (Sz (0 :> szp2)) be
+    -- Add zeroes in batch and channel dimensions
+    pad4 = Padding (Sz (0 :> 0 :> szp1)) (Sz (0 :> 0 :> szp2)) be
     -- Note: we apply stencils on zero channel of *all* images in the batch
     base = computeAs U $ applyStencil pad4 (sten 0) x
     -- Again, stencils are applied simultaneously on all images for a given
@@ -96,7 +96,7 @@ conv2d_ (Padding (Sz szp1) (Sz szp2) be) w x = compute res
 
 -- | 2D convolution with gradients
 conv2d :: Reifies s W
-       => Padding Ix3 Float
+       => Padding Ix2 Float
        -> BVar s (Volume4 Float)
        -> BVar s (Volume4 Float)
        -> BVar s (Volume4 Float)
