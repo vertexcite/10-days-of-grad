@@ -35,6 +35,7 @@ executables:
     - -Wall
     - -threaded
     - -rtsopts
+    - -with-rtsopts=-N6
     dependencies:
     - massiv-io
     - mnist-idx
@@ -55,3 +56,4 @@ benchmarks:
     - -O2
     - -threaded
     - -rtsopts
+    - -with-rtsopts=-N6
