@@ -16,7 +16,9 @@ module NeuralNetwork
   , Volume4
   , sigmoid
   , relu
+  , relu_
   , conv2d
+  , conv2d_
   , maxpool
   , NeuralNetwork.flatten
   , linear
@@ -54,6 +56,7 @@ import qualified Data.Massiv.Array as A
 import           Streamly
 import qualified Streamly.Prelude as S
 import           Numeric.Backprop
+import           Data.List ( foldl' )
 
 -- Note that images are volumes of channels x width x height, whereas
 -- mini-batches are volumes-4 of batch size x channels x width x height.
@@ -64,44 +67,40 @@ type Matrix a = Array U Ix2 a
 type Volume a = Array U Ix3 a
 type Volume4 a = Array U Ix4 a
 
--- Cross-correlation
-conv2d_ :: Padding Ix3 Float  -- ^ Padding
-        -> Stride Ix3
-        -> Array U Ix4 Float  -- ^ Weights
-        -> Array U Ix3 Float  -- ^ Input features
-        -> Array U Ix3 Float  -- ^ Output features
-conv2d_ padding stride w x = compute $ A.concat' (Dim 3) results
+-- | 2D convolution that operates on a batch.
+--
+-- Padding is Ix3 because an image in a batch is Ix3.
+--
+-- The stride is assumed to be 1, but this can be extended
+-- in a straightforward manner with `computeWithStride`.
+-- Do not forget to use stride 1 in the batch dimension (Dim4).
+conv2d_
+       :: Padding Ix3 Float  -- ^ Padding
+       -> Volume4 Float  -- ^ Weights
+       -> Volume4 Float  -- ^ Batch of input features
+       -> Volume4 Float  -- ^ Output features
+conv2d_ (Padding (Sz szp1) (Sz szp2) be) w x = compute res
   where
-    (Sz (cout :> cin :> _ :. _)) = size w
-    stencils = map (makeCorrelationStencilFromKernel. (w !>)) [0..cout - 1]
-    results :: [Array U Ix3 Float]
-    results = map (\s -> computeWithStride stride $ applyStencil padding s x) stencils
+    (Sz (cout :> cin :> x1 :. x2)) = size w
+    -- Extract weights, add fake Dim4, and make stencil
+    sten = makeCorrelationStencilFromKernel. resize' (Sz4 1 cin x1 x2). (w !>)
+    -- Add zero in batch dimension
+    pad4 = Padding (Sz (0 :> szp1)) (Sz (0 :> szp2)) be
+    -- Note: we apply stencils on the first channel of all images in the batch
+    base = computeAs U $ applyStencil pad4 (sten 0) x
+    res = foldl' (\prev ch -> let conv = computeAs U $ applyStencil pad4 (sten ch) x
+                              in computeAs U $ append' 3 prev conv) base [1..cout - 1]
 
--- Actual convolution
-conv2d__ :: Padding Ix3 Float  -- ^ Padding
-        -> Stride Ix3
-        -> Array U Ix4 Float  -- ^ Weights
-        -> Array U Ix3 Float  -- ^ Input features
-        -> Array U Ix3 Float  -- ^ Output features
-conv2d__ padding stride w x = compute $ A.concat' (Dim 3) results
-  where
-    (Sz (cout :> cin :> _ :. _)) = size w
-    stencils = map (makeConvolutionStencilFromKernel. (w !>)) [0..cout - 1]
-    results :: [Array U Ix3 Float]
-    results = map (\s -> computeWithStride stride $ applyStencil padding s x) stencils
-
--- TODO: work on Volume4 mini-batches
--- | 2D convolution with derivatives
+-- | 2D convolution with gradients
 conv2d :: Reifies s W
        => Padding Ix3 Float
-       -> Stride Ix3
        -> BVar s (Volume4 Float)
-       -> BVar s (Volume Float)
-       -> BVar s (Volume Float)
-conv2d p s = liftOp2. op2 $ \w x ->
-  (conv2d_ p s w x, \dz -> let dw = undefined
-                               dx = undefined
-                            in (dw, dx) )
+       -> BVar s (Volume4 Float)
+       -> BVar s (Volume4 Float)
+conv2d p = liftOp2. op2 $ \w x ->
+  (conv2d_ p w x, \dz -> let dw = undefined
+                             dx = undefined
+                         in (dw, dx) )
 
 instance (Index ix, Num e, Unbox e) => Backprop (Array U ix e) where
     zero x = A.replicate Par (size x) 0
@@ -124,11 +123,14 @@ linear = liftOp3. op3 $ \w b x ->
                   in (dW, dB, dX)
      )
 
+relu_ :: (Index ix, Unbox e, Ord e, Num e) => Array U ix e -> Array U ix e
+relu_ = computeMap (max 0)
+
 relu :: (Reifies s W, Index ix)
         => BVar s (Array U ix Float)
         -> BVar s (Array U ix Float)
 relu = liftOp1. op1 $ \x ->
-  (computeMap (max 0.0) x, \dY ->
+  (relu_ x, \dY ->
     let f x0 dy0 = if x0 <= 0
                       then 0
                       else dy0
@@ -151,8 +153,51 @@ sigmoid = liftOp1. op1 $ \x ->
   where
     f x = recip $ 1.0 + exp (-x)
 
--- TODO: operate on Volume4 mini-batches
-maxpool = undefined
+maxpoolStencil2x2 :: Stencil Ix4 Float Float
+maxpoolStencil2x2 = makeStencil (Sz4 1 1 2 2) 0 $ \ get -> let max4 x1 x2 x3 x4 = max (max (max x1 x2) x3) x4 in max4 <$> get (0 :> 0 :> 0 :. 0) <*> get (0 :> 0 :> 1 :. 1) <*> get (0 :> 0 :> 0 :. 1) <*> get (0 :> 0 :> 1 :. 0)
+
+maxpool :: Volume4 Float -> Volume4 Float
+maxpool = computeWithStride (Stride (1 :> 1 :> 2 :. 2)). applyStencil noPadding maxpoolStencil2x2
+
+-- > testA = fromLists' Seq [[[[1..4],[5..8],[9..12],[13..16]]]] :: Array U Ix4 Float
+--
+-- > testA
+-- Array U Seq (Sz (1 :> 1 :> 4 :. 4))
+--   [ [ [ [ 1.0, 2.0, 3.0, 4.0 ]
+--       , [ 5.0, 6.0, 7.0, 8.0 ]
+--       , [ 9.0, 10.0, 11.0, 12.0 ]
+--       , [ 13.0, 14.0, 15.0, 16.0 ]
+--       ]
+--     ]
+--   ]
+-- > maxpool testA
+-- Array U Seq (Sz (1 :> 1 :> 2 :. 2))
+--   [ [ [ [ 6.0, 8.0 ]
+--       , [ 14.0, 16.0 ]
+--       ]
+--     ]
+--   ]
+-- > testB = resize' (Sz4 2 1 2 4) testA
+-- > testB
+-- Array U Seq (Sz (2 :> 1 :> 2 :. 4))
+--   [ [ [ [ 1.0, 2.0, 3.0, 4.0 ]
+--       , [ 5.0, 6.0, 7.0, 8.0 ]
+--       ]
+--     ]
+--   , [ [ [ 9.0, 10.0, 11.0, 12.0 ]
+--       , [ 13.0, 14.0, 15.0, 16.0 ]
+--       ]
+--     ]
+--   ]
+-- > maxpool testB
+-- Array U Seq (Sz (2 :> 1 :> 1 :. 2))
+--   [ [ [ [ 6.0, 8.0 ]
+--       ]
+--     ]
+--   , [ [ [ 14.0, 16.0 ]
+--       ]
+--     ]
+--   ]
 
 flatten :: Reifies s W
         => BVar s (Volume4 Float)
@@ -211,6 +256,7 @@ cols m =
 computeMap :: (Source r2 ix e', Mutable r1 ix e) =>
   (e' -> e) -> Array r2 ix e' -> Array r1 ix e
 computeMap f = A.compute. A.map f
+{-# INLINE computeMap #-}
 
 linearW' :: Matrix Float
         -> Matrix Float

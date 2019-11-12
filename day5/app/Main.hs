@@ -99,6 +99,7 @@ train TrainSettings { _printEpochs = printEpochs
     ) (net, 1)
   return net'
 
+{-
 main :: IO ()
 main = do
   trainS <- mnistStream 1000 "data/train-images-idx3-ubyte" "data/train-labels-idx1-ubyte"
@@ -118,58 +119,34 @@ main = do
                               } net (trainS, testS)
 
   return ()
+-}
 
 writeImageY :: FilePath -> Matrix Float -> IO ()
 writeImageY f a = do
   let b = compute $ A.map pure a :: A.Image U Y Float
   A.writeImageAuto f b
 
-maxpoolStencil2x2 :: Stencil Ix3 Float Float
-maxpoolStencil2x2 = makeStencil (Sz3 1 2 2) 0 $ \ get -> let max4 x1 x2 x3 x4 = max (max (max x1 x2) x3) x4 in max4 <$> get (0 :> 0 :. 0) <*> get (0 :> 1 :. 1) <*> get (0 :> 0 :. 1) <*> get (0 :> 1 :. 0)
-
-maxpool2 :: Array U Ix3 Float -> Array U Ix3 Float
-maxpool2 = computeWithStride (Stride (1 :> 2 :. 2)). applyStencil noPadding maxpoolStencil2x2
-
-testA :: Array U Ix3 Float
-testA = fromLists' Seq [[[1..4],[5..8],[9..12],[13..16]]]
-
--- > testA
--- Array U Seq (Sz (1 :> 4 :. 4))
---   [ [ [ 1.0, 2.0, 3.0, 4.0 ]
---     , [ 5.0, 6.0, 7.0, 8.0 ]
---     , [ 9.0, 10.0, 11.0, 12.0 ]
---     , [ 13.0, 14.0, 15.0, 16.0 ]
---     ]
---   ]
--- > maxpool2 testA
--- Array U Seq (Sz (1 :> 2 :. 2))
---   [ [ [ 6.0, 8.0 ]
---     , [ 14.0, 16.0 ]
---     ]
---   ]
-
 infixl 9 ~>
 (~>) :: (a -> b) -> (b -> c) -> a -> c
 f ~> g = g. f
 {-# INLINE (~>) #-}
 
-lenetFeatures :: Array U Ix3 Float -> Array U Ix1 Float
-lenetFeatures = undefined
-{-
-lenetFeatures = conv2d w0 (Padding (Sz3 0 2 2) (Sz3 0 2 2) (Fill 0.0))
-              ~> relu
-              ~> maxpool2
-              ~> conv2d w1 noPadding
-              ~> relu
-              ~> maxpool2
-              ~> resize' (Sz (3 * 5 * 5))
--}
+noPad3 = Padding (Sz3 0 0 0) (Sz3 0 0 0) (Fill 0.0)
+
+lenetFeatures :: Volume4 Float -> Volume4 Float
+lenetFeatures = conv2d_ (Padding (Sz3 0 2 2) (Sz3 0 2 2) (Fill 0.0)) w0
+              ~> relu_
+              ~> maxpool
+              ~> conv2d_ noPad3 w1
+              ~> relu_
+              ~> maxpool
 
 testLeNet :: IO ()
 testLeNet = do
   -- By convention, the first dimension is channels
-  let im1channel = resize' (Sz (1 :> 28 :. 28)) im
-      featureMaps2 = lenetFeatures im1channel
+  let im1channel = resize' (Sz (1 :> 1 :> 28 :. 28)) im
+      batch = computeAs U $ append' 4 im1channel im1channel
+      featureMaps2 = lenetFeatures batch
 
   print $ size featureMaps2
   -- Sz (3 :> 5 :. 5)
@@ -189,9 +166,9 @@ testConv1D = do
   let stride = Stride 3
   print (computeWithStride stride $ mapStencil Edge delayedS a :: Vector Int)
 
--- main :: IO ()
--- main = putStrLn "Test 1D convolutions" >> testConv1D
---        >> putStrLn "Test 2D convolutions" >> testLeNet
+main :: IO ()
+main = putStrLn "Test 1D convolutions" >> testConv1D
+       >> putStrLn "Test 2D convolutions" >> testLeNet
 
 -- zeroPadding (m', n') = compute. applyStencil (Padding (Sz2 0 0) (Sz2 m' n') (Fill 0)) idStencil
 --
