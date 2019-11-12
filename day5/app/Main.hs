@@ -144,12 +144,13 @@ lenetFeatures = conv2d_ (Padding (Sz2 2 2) (Sz2 2 2) (Fill 0.0)) w0
 testLeNet :: IO ()
 testLeNet = do
   -- By convention, the first dimension is channels
-  let im1channel = resize' (Sz (1 :> 1 :> 28 :. 28)) im
-      batch = setComp Par $ computeAs U $ append' 4 im1channel im1channel
+  let im1channel = resize' (Sz (1 :> 28 :. 28)) im
+      batch = setComp Par $ computeAs U $ expandWithin Dim4 32 const im1channel
       featureMaps2 = lenetFeatures batch
 
+  print $ size batch
   print $ size featureMaps2
-  -- Sz (2 :> 3 :> 5 :. 5)
+  -- Sz (32 :> 3 :> 5 :. 5)
 
   -- mapM_ (\(i, result) ->  writeImageY (show i ++ ".png") result) $ zipWith (,) [0..]  (splitChannels featureMaps2)
 
