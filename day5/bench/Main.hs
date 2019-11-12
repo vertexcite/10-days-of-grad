@@ -4,7 +4,7 @@ import qualified Data.Massiv.Array as A
 import qualified Data.Massiv.Array.Manifest.Vector as A
 import           Data.List ( foldl' )
 
-import           Weights ( im, w0 )
+import           Weights ( im, w0, w1 )
 
 
 -- | 2D convolution
@@ -49,6 +49,7 @@ conv2dl' padding w x = compute res
 main :: IO ()
 main = do
   let padding = Padding (Sz3 0 2 2) (Sz3 0 2 2) (Fill 0.0) :: Padding Ix3 Float
+      fm2 = computeAs U. conv2dl' padding w0. resize' (Sz (1 :> 28 :. 28)) $ im
   defaultMain
     [ bgroup
         "Conv2d"
@@ -66,6 +67,24 @@ main = do
                 (return (resize' (Sz (1 :> 28 :. 28)) im))
                 (bench "List based".
                  whnf (computeAs U. conv2d' padding w0))
+            ]
+        ]
+    , bgroup
+        "Conv2d"
+        [ bgroup
+            "3 chan -> 3 chan, no padding"
+            [ env
+                (return (computeAs U fm2))
+                (bench "Delayed array based, foldl'".
+                 whnf (computeAs U. conv2dl' noPadding w1))
+            , env
+                (return (computeAs U fm2))
+                (bench "Delayed array based, foldr".
+                 whnf (computeAs U. conv2dr noPadding w1))
+            , env
+                (return (computeAs U fm2))
+                (bench "List based".
+                 whnf (computeAs U. conv2d' noPadding w1))
             ]
         ]
     ]
@@ -87,3 +106,21 @@ main = do
 --                      1.000 R²   (0.999 R² .. 1.000 R²)
 -- mean                 387.3 μs   (386.3 μs .. 389.7 μs)
 -- std dev              4.971 μs   (2.397 μs .. 9.977 μs)
+--
+-- benchmarking Conv2d/3 chan -> 3 chan, no padding/Delayed array based, foldl'
+-- time                 482.7 μs   (481.8 μs .. 483.3 μs)
+--                      1.000 R²   (1.000 R² .. 1.000 R²)
+-- mean                 483.8 μs   (483.3 μs .. 484.4 μs)
+-- std dev              1.845 μs   (1.384 μs .. 2.553 μs)
+--
+-- benchmarking Conv2d/3 chan -> 3 chan, no padding/Delayed array based, foldr
+-- time                 483.4 μs   (481.9 μs .. 485.0 μs)
+--                      1.000 R²   (1.000 R² .. 1.000 R²)
+-- mean                 483.6 μs   (482.8 μs .. 484.6 μs)
+-- std dev              2.803 μs   (2.067 μs .. 4.001 μs)
+--
+-- benchmarking Conv2d/3 chan -> 3 chan, no padding/List based
+-- time                 539.0 μs   (537.8 μs .. 540.0 μs)
+--                      1.000 R²   (1.000 R² .. 1.000 R²)
+-- mean                 540.0 μs   (539.2 μs .. 541.1 μs)
+-- std dev              3.031 μs   (2.308 μs .. 4.195 μs)
