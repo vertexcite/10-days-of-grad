@@ -60,10 +60,10 @@ mnistStream batchSize fpI fpL = do
       --          3    2
       -- So the first dimension is actually
       -- fourth in this notation
-      merge4 = A.compute. A.concat' 4
+      merge4 = setComp Par. A.compute. A.concat' 4
 
       merge2 :: [Matrix Float] -> Matrix Float
-      merge2 = A.compute. A.concat' 2
+      merge2 = setComp Par. A.compute. A.concat' 2
 
       vs' = map merge4 $ chunksOf batchSize vs
       labs' = map merge2 $ chunksOf batchSize labs
@@ -145,7 +145,7 @@ testLeNet :: IO ()
 testLeNet = do
   -- By convention, the first dimension is channels
   let im1channel = resize' (Sz (1 :> 1 :> 28 :. 28)) im
-      batch = computeAs U $ append' 4 im1channel im1channel
+      batch = setComp Par $ computeAs U $ append' 4 im1channel im1channel
       featureMaps2 = lenetFeatures batch
 
   print $ size featureMaps2
