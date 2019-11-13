@@ -58,6 +58,8 @@ import qualified Streamly.Prelude as S
 import           Numeric.Backprop
 import           Data.List ( foldl' )
 
+-- TODO: benchmark Array P instead of Array U
+
 -- Note that images are volumes of channels x width x height, whereas
 -- mini-batches are volumes-4 of batch size x channels x width x height.
 -- Similarly, convolutional filter weights are volumes-4 of
