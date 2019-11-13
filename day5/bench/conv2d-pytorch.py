@@ -21,6 +21,9 @@ print(1000 * (end - start)/N, "ms")
 # PyTorch 0.4.1
 # 2.0470764999999997 ms
 
+# PyTorch 1.2.0
+# 2.1088856049999998 ms
+
 start = time.process_time()
 for i in range(N):
     r = net2(fm1[i])
@@ -29,3 +32,6 @@ print(1000 * (end - start)/N, "ms")
 
 # PyTorch 0.4.1
 # 4.599914508 ms
+
+# PyTorch 1.2.0
+# 1.9183940690000005 ms
