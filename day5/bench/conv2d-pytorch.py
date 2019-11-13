@@ -18,6 +18,8 @@ for i in range(N):
     r = net1(fm0[i])
 end = time.process_time()
 print(1000 * (end - start)/N, "ms")
+# Dell Precision 5820 desktop (all 12 cores):
+#
 # PyTorch 0.4.1
 # 2.0470764999999997 ms
 

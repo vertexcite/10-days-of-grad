@@ -120,6 +120,9 @@ main = do
 -- mean 512.6 us (single im) -> 25.16ms/64=393us (batch of 64)
 
 {-
+
+Dell XPS Laptop (6 cores only):
+
 benchmarking Conv2d: no batches (3D)/1 chan -> 3 chan, with padding/Seq
 time                 281.3 μs   (280.0 μs .. 283.1 μs)
                      1.000 R²   (0.999 R² .. 1.000 R²)
@@ -198,4 +201,87 @@ time                 28.22 ms   (27.36 ms .. 29.87 ms)
 mean                 25.16 ms   (23.76 ms .. 26.48 ms)
 std dev              3.221 ms   (2.329 ms .. 3.838 ms)
 variance introduced by outliers: 56% (severely inflated)
+
+
+
+Dell Precision 5820 desktop (6 cores only):
+
+benchmarking Conv2d: no batches (3D)/1 chan -> 3 chan, with padding/Seq
+time                 288.9 μs   (287.9 μs .. 290.3 μs)
+                     1.000 R²   (1.000 R² .. 1.000 R²)
+mean                 288.8 μs   (288.2 μs .. 289.8 μs)
+std dev              2.822 μs   (2.062 μs .. 4.315 μs)
+
+benchmarking Conv2d: no batches (3D)/1 chan -> 3 chan, with padding/Par
+time                 773.9 μs   (664.1 μs .. 887.4 μs)
+                     0.886 R²   (0.839 R² .. 0.932 R²)
+mean                 989.8 μs   (926.3 μs .. 1.063 ms)
+std dev              251.6 μs   (219.6 μs .. 296.3 μs)
+variance introduced by outliers: 96% (severely inflated)
+
+benchmarking Conv2d: no batches (3D)/3 chan -> 3 chan, no padding/Seq
+time                 496.5 μs   (495.7 μs .. 497.2 μs)
+                     1.000 R²   (1.000 R² .. 1.000 R²)
+mean                 496.8 μs   (496.4 μs .. 497.4 μs)
+std dev              1.759 μs   (1.034 μs .. 2.673 μs)
+
+benchmarking Conv2d: no batches (3D)/3 chan -> 3 chan, no padding/Par
+time                 910.7 μs   (860.5 μs .. 992.6 μs)
+                     0.945 R²   (0.910 R² .. 0.977 R²)
+mean                 935.6 μs   (889.0 μs .. 996.5 μs)
+std dev              172.7 μs   (123.0 μs .. 238.5 μs)
+variance introduced by outliers: 91% (severely inflated)
+
+benchmarking Conv2d: batch size 1 (4D)/1 chan -> 3 chan, with padding/Seq
+time                 659.2 μs   (653.5 μs .. 668.8 μs)
+                     0.999 R²   (0.998 R² .. 1.000 R²)
+mean                 659.0 μs   (656.4 μs .. 665.9 μs)
+std dev              12.02 μs   (4.109 μs .. 21.43 μs)
+
+benchmarking Conv2d: batch size 1 (4D)/1 chan -> 3 chan, with padding/Par
+time                 1.065 ms   (1.022 ms .. 1.140 ms)
+                     0.970 R²   (0.948 R² .. 0.988 R²)
+mean                 1.073 ms   (1.039 ms .. 1.120 ms)
+std dev              142.9 μs   (101.5 μs .. 187.6 μs)
+variance introduced by outliers: 83% (severely inflated)
+
+benchmarking Conv2d: batch size 1 (4D)/3 chan -> 3 chan, no padding/Seq
+time                 1.046 ms   (1.044 ms .. 1.048 ms)
+                     1.000 R²   (1.000 R² .. 1.000 R²)
+mean                 1.046 ms   (1.044 ms .. 1.047 ms)
+std dev              4.230 μs   (3.378 μs .. 5.493 μs)
+
+benchmarking Conv2d: batch size 1 (4D)/3 chan -> 3 chan, no padding/Par
+time                 1.442 ms   (1.368 ms .. 1.574 ms)
+                     0.941 R²   (0.885 R² .. 0.990 R²)
+mean                 1.527 ms   (1.459 ms .. 1.640 ms)
+std dev              281.9 μs   (198.0 μs .. 419.3 μs)
+variance introduced by outliers: 90% (severely inflated)
+
+benchmarking Conv2d: batch size Sz1 64 (4D)/1 chan -> 3 chan, with padding/Seq
+time                 42.91 ms   (42.20 ms .. 43.74 ms)
+                     0.999 R²   (0.998 R² .. 1.000 R²)
+mean                 42.48 ms   (42.30 ms .. 42.83 ms)
+std dev              501.4 μs   (179.3 μs .. 870.8 μs)
+
+benchmarking Conv2d: batch size Sz1 64 (4D)/1 chan -> 3 chan, with padding/Par
+time                 8.757 ms   (7.805 ms .. 9.608 ms)
+                     0.958 R²   (0.942 R² .. 0.987 R²)
+mean                 8.578 ms   (8.261 ms .. 8.899 ms)
+std dev              1.031 ms   (864.6 μs .. 1.184 ms)
+variance introduced by outliers: 65% (severely inflated)
+
+benchmarking Conv2d: batch size Sz1 64 (4D)/3 chan -> 3 chan, no padding/Seq
+time                 67.12 ms   (66.96 ms .. 67.25 ms)
+                     1.000 R²   (1.000 R² .. 1.000 R²)
+mean                 67.32 ms   (67.22 ms .. 67.58 ms)
+std dev              244.1 μs   (129.4 μs .. 339.3 μs)
+
+benchmarking Conv2d: batch size Sz1 64 (4D)/3 chan -> 3 chan, no padding/Par
+time                 12.43 ms   (11.90 ms .. 13.37 ms)
+                     0.965 R²   (0.939 R² .. 0.990 R²)
+mean                 13.54 ms   (13.06 ms .. 14.11 ms)
+std dev              1.397 ms   (1.082 ms .. 1.717 ms)
+variance introduced by outliers: 52% (severely inflated)
+
 -}
