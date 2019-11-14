@@ -19,6 +19,8 @@ module NeuralNetwork
   , relu_
   , conv2d
   , conv2d_
+  , conv2d'
+  , conv2d''
   , maxpool
   , maxpool_
   , NeuralNetwork.flatten
@@ -96,6 +98,21 @@ conv2d_ (Padding (Sz szp1) (Sz szp2) be) w x = compute res
     res = foldl' (\prev ch -> let conv = computeAs U $ applyStencil pad4 (sten ch) x
                               in computeAs U $ append' 3 prev conv) base [1..cout - 1]
 
+conv2d'
+  :: Padding Ix2 Float -> Volume4 Float -> Volume4 Float -> Volume4 Float
+conv2d' p w dz = res
+  where
+    res = conv2d_ p (compute $ rot180 $ compute $ transposeInner w) dz
+
+conv2d''
+  :: Padding Ix2 Float -> Volume4 Float -> Volume4 Float -> Volume4 Float
+conv2d'' p x dz = conv2d_ p d x
+  where
+    d = computeAs U $ transposeInner dz
+
+rot180 :: Index ix => Array U ix Float -> Array D ix Float
+rot180 = reverse' 1. reverse' 2
+
 -- | 2D convolution with gradients
 conv2d :: Reifies s W
        => Padding Ix2 Float
@@ -103,8 +120,9 @@ conv2d :: Reifies s W
        -> BVar s (Volume4 Float)
        -> BVar s (Volume4 Float)
 conv2d p = liftOp2. op2 $ \w x ->
-  (conv2d_ p w x, \dz -> let dw = undefined
-                             dx = undefined
+  (conv2d_ p w x, \dz -> let dw = conv2d'' p x dz
+                             p1 = p  -- TODO
+                             dx = conv2d' p1 w dz
                          in (dw, dx) )
 
 instance (Index ix, Num e, Unbox e) => Backprop (Array U ix e) where
