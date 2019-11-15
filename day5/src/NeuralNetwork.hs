@@ -98,12 +98,21 @@ conv2d_ (Padding (Sz szp1) (Sz szp2) be) w x = compute res
     res = foldl' (\prev ch -> let conv = computeAs U $ applyStencil pad4 (sten ch) x
                               in computeAs U $ append' 3 prev conv) base [1..cout - 1]
 
+-- | Input gradients
+--
+-- \[ dX = \delta * W_{flip}, \]
+--
+-- where (*) is convolution. We also have to perform inner transpose
+-- over the kernel volume to be able to propagate in the backward direction.
 conv2d'
   :: Padding Ix2 Float -> Volume4 Float -> Volume4 Float -> Volume4 Float
 conv2d' p w dz = res
   where
     res = conv2d_ p (compute $ rot180 $ compute $ transposeInner w) dz
 
+-- | Kernel gradients
+--
+-- \[ dW = X * \delta \]
 conv2d''
   :: Padding Ix2 Float -> Volume4 Float -> Volume4 Float -> Volume4 Float
 conv2d'' p x dz = conv2d_ p d x
