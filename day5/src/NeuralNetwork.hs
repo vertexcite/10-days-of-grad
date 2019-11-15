@@ -27,10 +27,12 @@ module NeuralNetwork
   , conv2d''
   , maxpool
   , maxpool_
-  , NeuralNetwork.flatten
+  , flatten
   , linear
-  , genWeights
   , forward
+  , lenet
+  , noPad2
+  , (~>)
 
   -- * Training
   , sgd
@@ -44,6 +46,8 @@ module NeuralNetwork
   , rows
   , cols
   , computeMap
+  , randLinear
+  , randConv2d
   , rand
   , randn
   , iterN
@@ -54,7 +58,7 @@ import           Control.Applicative ( liftA2 )
 import           Control.DeepSeq ( NFData )
 import           Control.Monad ( replicateM, foldM )
 import           Data.List ( foldl', maximumBy )
-import           Data.Massiv.Array hiding ( map, zip, zipWith )
+import           Data.Massiv.Array hiding ( map, zip, zipWith, flatten )
 import qualified Data.Massiv.Array as A
 import           Data.Ord
 import           GHC.Generics ( Generic )
@@ -86,7 +90,7 @@ data Linear a = Linear { _w :: !(Matrix a)
   deriving (Show, Generic)
 
 -- | Convolutional layer weights. We omit biases for simplicity.
-data Conv2d a = Conv2d { _kernel :: !(Volume4 a) }
+data Conv2d a = Conv2d { _kernels :: !(Volume4 a) }
   deriving (Show, Generic)
 
 instance NFData (Linear a)
@@ -103,6 +107,59 @@ data LeNet a =
           , _fc3 :: !(Linear a)
           }
   deriving (Show, Generic)
+
+makeLenses ''LeNet
+
+sameConv2d :: Reifies s W
+    => BVar s (Conv2d Float)
+    -> BVar s (Volume4 Float)
+    -> BVar s (Volume4 Float)
+sameConv2d = conv2d (Padding (Sz2 2 2) (Sz2 2 2) (Fill 0.0))
+
+validConv2d :: Reifies s W
+    => BVar s (Conv2d Float)
+    -> BVar s (Volume4 Float)
+    -> BVar s (Volume4 Float)
+validConv2d = conv2d noPad2
+
+lenet
+    :: (Reifies s W)
+    => BVar s (LeNet Float)
+    -> Volume4 Float  -- ^ Batch of MNIST images
+    -> BVar s (Matrix Float)
+lenet l = constVar
+
+          -- Feature extractor
+          -- Layer (layer group) #1
+          ~> sameConv2d (l ^^. conv1)
+          ~> relu
+          ~> maxpool
+          -- Layer #2
+          ~> validConv2d (l ^^. conv2)
+          ~> relu
+          ~> maxpool
+
+          ~> flatten
+
+          -- Classifier
+          -- Layer #3
+          ~> linear (l ^^. fc1)
+          ~> relu
+          -- Layer #4
+          ~> linear (l ^^. fc2)
+          ~> relu
+          -- Layer #5
+          ~> linear (l ^^. fc3)
+          ~> softmax
+{-# INLINE lenet #-}
+
+infixl 9 ~>
+(~>) :: (a -> b) -> (b -> c) -> a -> c
+f ~> g = g. f
+{-# INLINE (~>) #-}
+
+noPad2 :: Padding Ix2 Float
+noPad2 = Padding (Sz2 0 0) (Sz2 0 0) (Fill 0.0)
 
 type ConvNet = LeNet
 
@@ -252,6 +309,8 @@ linear = liftOp2. op2 $ \(Linear w b) x ->
                   in (Linear dW dB, dX)
      )
 
+-- TODO: differentiable (|*|), (.+.), and (-) analogs
+
 relu_ :: (Index ix, Unbox e, Ord e, Num e) => Array U ix e -> Array U ix e
 relu_ = computeMap (max 0)
 
@@ -396,31 +455,19 @@ bias' dY = compute $ m *. (_sumRows $ delay dY)
   where
     m = recip $ fromIntegral $ rows dY
 
--- | Forward pass in a neural network:
--- exploit Haskell lazyness to never compute the
--- gradients.
-forward
-  :: ConvNet Float -> Volume4 Float -> Matrix Float
-forward net dta = fst $ pass Eval net (dta, undefined)
+-- | Forward pass in a neural network (inference)
+forward :: ConvNet Float -> Volume4 Float -> Matrix Float
+forward net dta = undefined
 
-softmax :: Matrix Float -> Matrix Float
-softmax x =
+softmax_ :: Matrix Float -> Matrix Float
+softmax_ x =
   let x0 = expA (delay x)
       x1 = computeAs U $ _sumCols x0  -- Note _sumCols, not _sumRows
       x2 = x1 `colsLike` x
   in maybe (error  "Inconsistent dimensions in softmax") compute (x0 ./. x2)
 
--- | Both forward and backward neural network passes
-pass
-  :: Phase
-  -- ^ `Train` or `Eval`
-  -> ConvNet Float
-  -- ^ `ConvNet` `Layer`s: weights and activations
-  -> (Volume4 Float, Matrix Float)
-  -- ^ Mini-batch with labels
-  -> (Matrix Float, [Grad Float])
-  -- ^ NN computation from forward pass and weight gradients
-pass = undefined
+-- TODO differentiable softmax
+softmax = undefined
 
 -- | Broadcast a vector in Dim2
 rowsLike :: Manifest r Ix1 Float
@@ -480,28 +527,26 @@ sgd lr n net0 dataStream = undefined
 --
 --     f _ _ = error "Layer/gradients mismatch"
 
-subtractGrad
-  :: (Num e, MonadThrow m, Source r1 ix e, Source r2 ix e) =>
-     e -> Array r1 ix e -> Array r2 ix e -> m (Array D ix e)
-subtractGrad lr w dW = delay w .-. (lr *. delay dW)
-
-subtractGradMaybe
-  :: (Mutable r ix e, Num e, Source r1 ix e, Source r2 ix e) =>
-     e -> Array r1 ix e -> Array r2 ix e -> Array r ix e
-subtractGradMaybe lr w dW = maybe (error "Inconsistent dimensions") compute (subtractGrad lr w dW)
+-- subtractGrad
+--   :: (Num e, MonadThrow m, Source r1 ix e, Source r2 ix e) =>
+--      e -> Array r1 ix e -> Array r2 ix e -> m (Array D ix e)
+-- subtractGrad lr w dW = delay w .-. (lr *. delay dW)
+--
+-- subtractGradMaybe
+--   :: (Mutable r ix e, Num e, Source r1 ix e, Source r2 ix e) =>
+--      e -> Array r1 ix e -> Array r2 ix e -> Array r ix e
+-- subtractGradMaybe lr w dW = maybe (error "Inconsistent dimensions") compute (subtractGrad lr w dW)
 
 -- | Strict left fold
 iterN :: Monad m => Int -> (a -> m a) -> a -> m a
 iterN n f x0 = foldM (\x _ -> f x) x0 [1..n]
 
 -- | Generate random weights and biases
-genWeights
-  :: (Int, Int)
-  -> IO (Matrix Float, Vector Float)
-genWeights (nin, nout) = do
+randLinear :: Sz2 -> IO (Linear Float)
+randLinear (Sz2 nin nout) = do
   w <- setComp Par <$> _genWeights (nin, nout)
   b <- setComp Par <$> _genBiases nout
-  return (w, b)
+  return (Linear w b)
     where
       _genWeights (nin', nout') = do
           a <- randn sz :: IO (Matrix Float)
@@ -511,6 +556,10 @@ genWeights (nin, nout) = do
           k = 0.01
 
       _genBiases n = randn (Sz n)
+
+-- | Generate random kernels volume
+randConv2d :: Sz4 -> IO (Conv2d Float)
+randConv2d = undefined
 
 maxIndex :: (Ord a, Num b, Enum b) => [a] -> b
 maxIndex xs = snd $ maximumBy (comparing fst) (zip xs [0..])

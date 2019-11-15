@@ -135,13 +135,6 @@ writeImageY f a = do
   let b = compute $ A.map pure a :: A.Image U Y Float
   A.writeImageAuto f b
 
-infixl 9 ~>
-(~>) :: (a -> b) -> (b -> c) -> a -> c
-f ~> g = g. f
-{-# INLINE (~>) #-}
-
-noPad2 = Padding (Sz2 0 0) (Sz2 0 0) (Fill 0.0)
-
 lenetFeatures :: Volume4 Float -> Volume4 Float
 lenetFeatures = conv2d_ (Padding (Sz2 2 2) (Sz2 2 2) (Fill 0.0)) w0
               ~> relu_
