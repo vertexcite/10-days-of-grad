@@ -2,7 +2,11 @@
 --
 -- Note that some functions have been updated w.r.t massiv-0.4.3.0,
 -- most notably changed Data.Massiv.Array.Numeric
+--
+-- This work was largely inspired by
+-- https://github.com/mstksg/backprop/blob/master/samples/backprop-mnist.lhs
 
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -13,7 +17,7 @@
 {-# OPTIONS_GHC -fno-warn-partial-type-signatures #-}
 
 module NeuralNetwork
-  ( ConvNet
+  ( LeNet
   , Vector
   , Matrix
   , Volume
@@ -27,6 +31,7 @@ module NeuralNetwork
   , conv2d''
   , maxpool
   , maxpool_
+  , softmax_
   , flatten
   , linear
   , forward
@@ -48,6 +53,7 @@ module NeuralNetwork
   , computeMap
   , randLinear
   , randConv2d
+  , randNetwork
   , rand
   , randn
   , iterN
@@ -72,6 +78,8 @@ import qualified Streamly.Prelude as S
 import qualified System.Random.MWC as MWC
 import           System.Random.MWC ( createSystemRandom )
 import           System.Random.MWC.Distributions ( standard )
+
+-- TODO hlint
 
 -- Note that images are volumes of channels x width x height, whereas
 -- mini-batches are volumes-4 of batch size x channels x width x height.
@@ -150,7 +158,6 @@ lenet l = constVar
           ~> relu
           -- Layer #5
           ~> linear (l ^^. fc3)
-          ~> softmax
 {-# INLINE lenet #-}
 
 infixl 9 ~>
@@ -205,22 +212,22 @@ instance ( Unbox a
     signum      = gSignum
     fromInteger = gFromInteger
 
-instance (Num a, Unbox a) => Fractional (Conv2d a) where
-    (/)          = error "Please define Conv2d (/)"
-    recip        = error "Please define Conv2d recip"
-    fromRational = undefined
-
-instance (Num a, Unbox a) => Fractional (Linear a) where
-    (/)          = error "Please define Linear (/)"
-    recip        = error "Please define Linear recip"
-    fromRational = undefined
-
-instance ( Num a
-         , Unbox a
-         ) => Fractional (ConvNet a) where
-    (/)          = gDivide
-    recip        = gRecip
-    fromRational = gFromRational
+-- instance (Num a, Unbox a) => Fractional (Conv2d a) where
+--     (/)          = error "Please define Conv2d (/)"
+--     recip        = error "Please define Conv2d recip"
+--     fromRational = error "Please define Conv2d fromRational (introduce Conv2d a i o)"
+--
+-- instance (Num a, Unbox a) => Fractional (Linear a) where
+--     (/)          = error "Please define Linear (/)"
+--     recip        = error "Please define Linear recip"
+--     fromRational = error "Please define Linear fromRational (introduce Linear a i o)"
+--
+-- instance ( Num a
+--          , Unbox a
+--          ) => Fractional (ConvNet a) where
+--     (/)          = gDivide
+--     recip        = gRecip
+--     fromRational = gFromRational
 
 instance (Num a, Unbox a) => Backprop (Conv2d a)
 instance (Num a, Unbox a) => Backprop (Linear a)
@@ -255,10 +262,11 @@ conv2d_ (Padding (Sz szp1) (Sz szp2) be) w x = compute res
 
 -- | Input gradients
 --
--- \[ dX = \delta * W_{flip}, \]
+-- \[ dX = \delta (*) W_{flip}, \]
 --
--- where (*) is convolution. We also have to perform inner transpose
--- over the kernel volume to be able to propagate in the backward direction.
+-- where (*) is cross-correlation. We also have to perform inner transpose
+-- over the kernel volume since we are propagating errors in the backward
+-- direction.
 conv2d'
   :: Padding Ix2 Float -> Volume4 Float -> Volume4 Float -> Volume4 Float
 conv2d' p w dz = res
@@ -324,7 +332,7 @@ relu = liftOp1. op1 $ \x ->
                       else dy0
      in compute $ A.zipWith f x dY)
 
--- | Elementwise sigmoid and its derivative
+-- | Elementwise sigmoid with gradients
 sigmoid :: forall s ix. (Reifies s W, Index ix)
         => BVar s (Array U ix Float)
         -> BVar s (Array U ix Float)
@@ -390,7 +398,11 @@ maxpool_ = computeWithStride (Stride (1 :> 1 :> 2 :. 2)). applyStencil noPadding
 maxpool :: Reifies s W
         => BVar s (Volume4 Float)
         -> BVar s (Volume4 Float)
-maxpool = undefined
+maxpool = liftOp1. op1 $ \x ->
+  let out = maxpool_ x
+      upsampled = undefined :: Volume4 Float  -- replicate elements from out
+      maxima = A.zipWith (\a b -> if a == b then 1 else 0) upsampled x
+  in (out, \dz -> maybe (error "Dimensions") compute (maxima .*. delay dz))
 
 flatten :: Reifies s W
         => BVar s (Volume4 Float)
@@ -457,17 +469,31 @@ bias' dY = compute $ m *. (_sumRows $ delay dY)
 
 -- | Forward pass in a neural network (inference)
 forward :: ConvNet Float -> Volume4 Float -> Matrix Float
-forward net dta = undefined
+forward net dta = evalBP (flip lenet dta) net
 
 softmax_ :: Matrix Float -> Matrix Float
 softmax_ x =
   let x0 = expA (delay x)
       x1 = computeAs U $ _sumCols x0  -- Note _sumCols, not _sumRows
       x2 = x1 `colsLike` x
-  in maybe (error  "Inconsistent dimensions in softmax") compute (x0 ./. x2)
+  in maybe (error  "Inconsistent dimensions in softmax_") compute (x0 ./. x2)
 
--- TODO differentiable softmax
-softmax = undefined
+crossEntropyLoss
+  :: forall s. (Reifies s W)
+  => Volume4 Float
+  -> Matrix Float
+  -> BVar s (ConvNet Float)
+  -> BVar s (Matrix Float)
+crossEntropyLoss x targ n = _ce y
+  where
+    y = lenet n x :: BVar s (Matrix Float)
+    _ce :: BVar s (Matrix Float) -> BVar s (Matrix Float)
+    -- Gradients only
+    _ce = liftOp1. op1 $ \pred_ ->
+      (undefined, \_ -> pred_ - targ)
+    -- _ce pred_ = pred_ - targ_
+    -- targ_ = constVar targ
+{-# INLINE crossEntropyLoss #-}
 
 -- | Broadcast a vector in Dim2
 rowsLike :: Manifest r Ix1 Float
@@ -500,32 +526,13 @@ sgd :: Monad m
   -> SerialT m (Volume4 Float, Matrix Float)
   -- ^ Data stream
   -> m (ConvNet Float)
-sgd lr n net0 dataStream = undefined
--- sgd lr n net0 dataStream = iterN n epochStep net0
---   where
---     epochStep net = S.foldl' g net dataStream
---
---     g :: ConvNet Float
---       -> (Volume4 Float, Matrix Float)
---       -> ConvNet Float
---     g net dta =
---       let (_, dW) = pass Train net dta
---       in (zipWith f net dW)
---
---     f :: Layer Float -> Grad Float -> Layer Float
---
---     -- Update Linear layer weights
---     f (Linear w b) (LinearGrad dW dB) =
---       let w1 = subtractGradMaybe lr w dW
---           b1 = subtractGradMaybe lr b dB
---       in Linear w1 b1
---
---     f (Conv2d w) (Conv2dGrad dW) = Conv2d (subtractGradMaybe lr w dW)
---
---     -- No parameters to change
---     f layer NoGrad = layer
---
---     f _ _ = error "Layer/gradients mismatch"
+sgd lr n net0 dataStream = iterN n epochStep net0
+  where
+    -- Iterate over all batches
+    epochStep net = S.foldl' _trainStep net dataStream
+    -- Update gradients based on a single batch
+    _trainStep net (x, targ) = trainStep lr x targ net
+    {-# INLINE _trainStep #-}
 
 -- subtractGrad
 --   :: (Num e, MonadThrow m, Source r1 ix e, Source r2 ix e) =>
@@ -537,29 +544,77 @@ sgd lr n net0 dataStream = undefined
 --      e -> Array r1 ix e -> Array r2 ix e -> Array r ix e
 -- subtractGradMaybe lr w dW = maybe (error "Inconsistent dimensions") compute (subtractGrad lr w dW)
 
+-- | Gradient descent step
+trainStep
+  :: Float  -- ^ Learning rate
+  -> Volume4 Float  -- ^ Images batch
+  -> Matrix Float  -- ^ Targets
+  -> ConvNet Float  -- ^ Initial network
+  -> ConvNet Float
+trainStep lr !x !targ !n = n - (computeMap' (lr *) (gradBP (crossEntropyLoss x targ) n))
+-- The problem is that realToFrac does not know about the shape.
+-- This can be solved having that information on the type level.
+-- Conv2d a i o k, i = in channels, o = out channels, k = square kernel size
+-- and Linear a i o, i = inputs, o = outputs.
+-- trainStep lr !x !targ !n = n - realToFrac lr * gradBP (loss x targ) n
+{-# INLINE trainStep #-}
+
+-- This could be definitely improved: see comments above (`trainStep`)
+computeMap' :: (Float -> Float) -> LeNet Float -> LeNet Float
+computeMap' f (LeNet { _conv1 = Conv2d k1
+                     , _conv2 = Conv2d k2
+                     , _fc1 = Linear w1 b1
+                     , _fc2 = Linear w2 b2
+                     , _fc3 = Linear w3 b3
+                     }) = LeNet { _conv1 = Conv2d (computeMap f k1)
+                                , _conv2 = Conv2d (computeMap f k2)
+                                , _fc1 = Linear (computeMap f w1) (computeMap f b1)
+                                , _fc2 = Linear (computeMap f w2) (computeMap f b2)
+                                , _fc3 = Linear (computeMap f w3) (computeMap f b3)
+                                }
+
 -- | Strict left fold
 iterN :: Monad m => Int -> (a -> m a) -> a -> m a
 iterN n f x0 = foldM (\x _ -> f x) x0 [1..n]
 
 -- | Generate random weights and biases
 randLinear :: Sz2 -> IO (Linear Float)
-randLinear (Sz2 nin nout) = do
-  w <- setComp Par <$> _genWeights (nin, nout)
-  b <- setComp Par <$> _genBiases nout
-  return (Linear w b)
+randLinear sz@(Sz2 _ nout) = do
+  _w <- setComp Par <$> _genWeights sz
+  _b <- setComp Par <$> _genBiases nout
+  return (Linear _w _b)
     where
-      _genWeights (nin', nout') = do
-          a <- randn sz :: IO (Matrix Float)
-          return (compute $ k *. (delay a))
-        where
-          sz = Sz (nin' :. nout')
-          k = 0.01
-
       _genBiases n = randn (Sz n)
 
--- | Generate random kernels volume
+_genWeights :: Index ix => Sz ix -> IO (Array U ix Float)
+_genWeights sz = do
+    a <- randn sz
+    return (compute $ k *. (delay a))
+  where
+    -- Weight scaling factor. Can also be dependent on `sz`.
+    k = 0.01
+
+-- | Generate random convolutional layer
 randConv2d :: Sz4 -> IO (Conv2d Float)
-randConv2d = undefined
+randConv2d sz = do
+  k <- setComp Par <$> _genWeights sz
+  return (Conv2d k)
+
+randNetwork :: IO (ConvNet Float)
+randNetwork = do
+  _conv1 <- randConv2d (Sz4 3 1 5 5)
+  _conv2 <- randConv2d (Sz4 3 3 5 5)
+  let [i, h1, h2, o] = [3 * 5 * 5, 120, 84, 10]
+  _fc1 <- randLinear (Sz2 i h1)
+  _fc2 <- randLinear (Sz2 h1 h2)
+  _fc3 <- randLinear (Sz2 h2 o)
+  return $
+    LeNet { _conv1 = _conv1
+          , _conv2 = _conv2
+          , _fc1 = _fc1
+          , _fc2 = _fc2
+          , _fc3 = _fc3
+          }
 
 maxIndex :: (Ord a, Num b, Enum b) => [a] -> b
 maxIndex xs = snd $ maximumBy (comparing fst) (zip xs [0..])

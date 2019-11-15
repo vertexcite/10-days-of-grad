@@ -1,13 +1,11 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DataKinds #-}
 
-
-
 import           Data.Massiv.Array hiding ( map, zip, unzip, zipWith, mapM_ )
 import qualified Data.Massiv.Array as A
 import qualified Data.Massiv.Array.Manifest.Vector as A
-import qualified Data.Massiv.Array.IO as A
-import           Graphics.ColorSpace
+-- import qualified Data.Massiv.Array.IO as A
+-- import           Graphics.ColorSpace
 import           Streamly
 import qualified Streamly.Prelude as S
 import           Text.Printf ( printf )
@@ -19,7 +17,7 @@ import           Data.List.Split ( chunksOf )
 
 import           NeuralNetwork
 import           Shuffle ( shuffleIO )
-import           Weights
+-- import           Weights
 
 -- TODO: implement algorithm from
 -- Accelerating Deep Learning by Focusing on the Biggest Losers
@@ -78,10 +76,10 @@ data TrainSettings = TrainSettings
 
 train
   :: TrainSettings
-  -> ConvNet Float
+  -> LeNet Float
   -> (SerialT IO (Volume4 Float, Matrix Float),
       SerialT IO (Volume4 Float, Matrix Float))
-  -> IO (ConvNet Float)
+  -> IO (LeNet Float)
 train TrainSettings { _printEpochs = printEpochs
                     , _lr = lr
                     , _totalEpochs = totalEpochs
@@ -99,6 +97,21 @@ train TrainSettings { _printEpochs = printEpochs
     ) (net, 1)
   return net'
 
+main :: IO ()
+main = do
+  trainS <- mnistStream 1000 "data/train-images-idx3-ubyte" "data/train-labels-idx1-ubyte"
+  testS <- mnistStream 1000 "data/t10k-images-idx3-ubyte" "data/t10k-labels-idx1-ubyte"
+
+  net <- randNetwork
+
+  net' <- train TrainSettings { _printEpochs = 1
+                              , _lr = 0.1
+                              , _totalEpochs = 10
+                              } net (trainS, testS)
+
+  return ()
+
+{-
 testGrad =
   let im' = resize' (Sz4 1 1 28 28) im
       d0 = A.replicate Par (Sz2 1 3) 1.0 :: Matrix Float
@@ -107,28 +120,6 @@ testGrad =
       a' = conv2d' (Padding (Sz2 2 2) (Sz2 2 2) (Fill 0.0)) w0 d
       w' = conv2d'' (Padding (Sz2 2 2) (Sz2 2 2) (Fill 0.0)) im' d
   in (a', w', d)
-
-{-
-main :: IO ()
-main = do
-  trainS <- mnistStream 1000 "data/train-images-idx3-ubyte" "data/train-labels-idx1-ubyte"
-  testS <- mnistStream 1000 "data/t10k-images-idx3-ubyte" "data/t10k-labels-idx1-ubyte"
-
-  -- Linear layers' initial weights
-  let [i, h1, h2, o] = [3 * 5 * 5, 120, 84, 10]
-  (w1, b1) <- genWeights (i, h1)
-  (w2, b2) <- genWeights (h1, h2)
-  (w3, b3) <- genWeights (h2, o)
-
-  let net = undefined
-
-  net' <- train TrainSettings { _printEpochs = 1
-                              , _lr = 0.1
-                              , _totalEpochs = 10
-                              } net (trainS, testS)
-
-  return ()
--}
 
 writeImageY :: FilePath -> Matrix Float -> IO ()
 writeImageY f a = do
@@ -172,6 +163,7 @@ testConv1D = do
 main :: IO ()
 main = putStrLn "Test 1D convolutions" >> testConv1D
        >> putStrLn "Test 2D convolutions" >> testLeNet
+-}
 
 -- zeroPadding (m', n') = compute. applyStencil (Padding (Sz2 0 0) (Sz2 m' n') (Fill 0)) idStencil
 --
