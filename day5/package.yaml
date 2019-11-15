@@ -11,12 +11,15 @@ extra-source-files:
 
 dependencies:
 - base                    >= 4.7 && < 4.13
+- deepseq
 - massiv                  >= 0.4.3.0 && < 0.5
 - mwc-random
 - streamly
 - MonadRandom
 - array
 - backprop
+- microlens
+- microlens-th
 # - splitmix
 
 library:
@@ -25,6 +28,9 @@ library:
   - -Wall
   - -fwarn-missing-signatures
   # - -Werror
+  dependencies:
+  - one-liner
+  - one-liner-instances
 
 executables:
   conv:

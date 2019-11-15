@@ -7,6 +7,7 @@ import           Data.List ( foldl' )
 import           Weights ( im, w0, w1 )
 import           NeuralNetwork ( conv2d_ )
 
+-- TODO: benchmark Array P instead of Array U on larger arrays
 
 -- | 2D convolution on individual image
 conv2dl'

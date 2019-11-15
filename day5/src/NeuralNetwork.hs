@@ -1,15 +1,19 @@
--- |= Neural Network Building Blocks
+-- |= Convolutional Neural Network Building Blocks
 --
 -- Note that some functions have been updated w.r.t massiv-0.4.3.0,
 -- most notably changed Data.Massiv.Array.Numeric
 
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# OPTIONS_GHC -fno-warn-partial-type-signatures #-}
 
 module NeuralNetwork
   ( ConvNet
-  , Layer (..)
   , Vector
   , Matrix
   , Volume
@@ -46,21 +50,24 @@ module NeuralNetwork
   , br
   ) where
 
-import           Control.Monad ( replicateM, foldM )
 import           Control.Applicative ( liftA2 )
+import           Control.DeepSeq ( NFData )
+import           Control.Monad ( replicateM, foldM )
+import           Data.List ( foldl', maximumBy )
+import           Data.Massiv.Array hiding ( map, zip, zipWith )
+import qualified Data.Massiv.Array as A
+import           Data.Ord
+import           GHC.Generics ( Generic )
+import           Lens.Micro
+import           Lens.Micro.TH
+import           Numeric.Backprop
+import           Numeric.Backprop.Class ( addNum )
+import           Numeric.OneLiner
+import           Streamly
+import qualified Streamly.Prelude as S
 import qualified System.Random.MWC as MWC
 import           System.Random.MWC ( createSystemRandom )
 import           System.Random.MWC.Distributions ( standard )
-import           Data.List ( maximumBy )
-import           Data.Ord
-import           Data.Massiv.Array hiding ( map, zip, zipWith )
-import qualified Data.Massiv.Array as A
-import           Streamly
-import qualified Streamly.Prelude as S
-import           Numeric.Backprop
-import           Data.List ( foldl' )
-
--- TODO: benchmark Array P instead of Array U
 
 -- Note that images are volumes of channels x width x height, whereas
 -- mini-batches are volumes-4 of batch size x channels x width x height.
@@ -70,6 +77,97 @@ type Vector a = Array U Ix1 a
 type Matrix a = Array U Ix2 a
 type Volume a = Array U Ix3 a
 type Volume4 a = Array U Ix4 a
+
+-- | Learnable neural network parameters.
+-- Fully-connected layer weights.
+data Linear a = Linear { _w :: !(Matrix a)
+                       , _b :: !(Vector a)
+                       }
+  deriving (Show, Generic)
+
+-- | Convolutional layer weights. We omit biases for simplicity.
+data Conv2d a = Conv2d { _kernel :: !(Volume4 a) }
+  deriving (Show, Generic)
+
+instance NFData (Linear a)
+makeLenses ''Linear
+
+instance NFData (Conv2d a)
+makeLenses ''Conv2d
+
+data LeNet a =
+    LeNet { _conv1 :: !(Conv2d a)
+          , _conv2 :: !(Conv2d a)
+          , _fc1 :: !(Linear a)
+          , _fc2 :: !(Linear a)
+          , _fc3 :: !(Linear a)
+          }
+  deriving (Show, Generic)
+
+type ConvNet = LeNet
+
+-- We would like to be able to perform arithmetic
+-- operations over parameters, e.g. in SDG implementation.
+-- Therefore, we define the Num instance.
+instance (Num a, Unbox a, Index ix) => Num (Array U ix a) where
+    x + y       = maybe (error "Dimension mismatch") compute (delay x .+. delay y)
+    x - y       = maybe (error "Dimension mismatch") compute (delay x .-. delay y)
+    x * y       = maybe (error "Dimension mismatch") compute (delay x .*. delay y)
+    -- Maybe define later, when we will actually need those
+    negate      = error "Please define negate"
+    abs         = error "Please define abs"
+    signum      = error "Please define signum"
+    fromInteger = error "Please define me"
+
+instance (Num a, Unbox a) => Num (Conv2d a) where
+    (+)         = gPlus
+    (-)         = gMinus
+    (*)         = gTimes
+    negate      = gNegate
+    abs         = gAbs
+    signum      = gSignum
+    fromInteger = gFromInteger
+
+instance (Num a, Unbox a) => Num (Linear a) where
+    (+)         = gPlus
+    (-)         = gMinus
+    (*)         = gTimes
+    negate      = gNegate
+    abs         = gAbs
+    signum      = gSignum
+    fromInteger = gFromInteger
+
+instance ( Unbox a
+         , Num a
+         ) => Num (ConvNet a) where
+    (+)         = gPlus
+    (-)         = gMinus
+    (*)         = gTimes
+    negate      = gNegate
+    abs         = gAbs
+    signum      = gSignum
+    fromInteger = gFromInteger
+
+instance (Num a, Unbox a) => Fractional (Conv2d a) where
+    (/)          = error "Please define Conv2d (/)"
+    recip        = error "Please define Conv2d recip"
+    fromRational = undefined
+
+instance (Num a, Unbox a) => Fractional (Linear a) where
+    (/)          = error "Please define Linear (/)"
+    recip        = error "Please define Linear recip"
+    fromRational = undefined
+
+instance ( Num a
+         , Unbox a
+         ) => Fractional (ConvNet a) where
+    (/)          = gDivide
+    recip        = gRecip
+    fromRational = gFromRational
+
+instance (Num a, Unbox a) => Backprop (Conv2d a)
+instance (Num a, Unbox a) => Backprop (Linear a)
+instance (Num a, Unbox a) => Backprop (ConvNet a)
 
 -- | 2D convolution that operates on a batch.
 --
@@ -121,38 +219,37 @@ conv2d'' p x dz = conv2d_ p d x
 
 rot180 :: Index ix => Array U ix Float -> Array D ix Float
 rot180 = reverse' 1. reverse' 2
+{-# INLINE rot180 #-}
 
--- | 2D convolution with gradients
+-- | Differentiable 2D convolutional layer
 conv2d :: Reifies s W
        => Padding Ix2 Float
+       -> BVar s (Conv2d Float)
        -> BVar s (Volume4 Float)
        -> BVar s (Volume4 Float)
-       -> BVar s (Volume4 Float)
-conv2d p = liftOp2. op2 $ \w x ->
+conv2d p = liftOp2. op2 $ \(Conv2d w) x ->
   (conv2d_ p w x, \dz -> let dw = conv2d'' p x dz
                              p1 = p  -- TODO
                              dx = conv2d' p1 w dz
-                         in (dw, dx) )
+                         in (Conv2d dw, dx) )
 
 instance (Index ix, Num e, Unbox e) => Backprop (Array U ix e) where
     zero x = A.replicate Par (size x) 0
-    add x y = maybe (error "Dimension mismatch") compute (delay x .+. delay y)
+    add = addNum  -- Making use of Num Array instance
     one x = A.replicate Par (size x) 1
 
--- TODO: refactor to a composition of
--- new differentiable |*| and .+. operators
+-- | Linear layer
 linear :: Reifies s W
-       => BVar s (Matrix Float)
-       -> BVar s (Vector Float)
+       => BVar s (Linear Float)
        -> BVar s (Matrix Float)
        -> BVar s (Matrix Float)
-linear = liftOp3. op3 $ \w b x ->
+linear = liftOp2. op2 $ \(Linear w b) x ->
   let prod = maybe (error "Dimension mismatch") id (x |*| w)
       lin = maybe (error "Dimension mismatch") compute (delay prod .+. (b `rowsLike` x))
   in (lin, \dZ -> let dW = linearW' x dZ
                       dB = bias' dZ
                       dX = linearX' w dZ
-                  in (dW, dB, dX)
+                  in (Linear dW dB, dX)
      )
 
 relu_ :: (Index ix, Unbox e, Ord e, Num e) => Array U ix e -> Array U ix e
@@ -244,9 +341,7 @@ flatten = liftOp1. op1 $ \x ->
       sz = Sz2 bs (ch * h * w)
    in (resize' sz x, \dz -> resize' sz0 dz)
 
-data Layer a = Layer a
-type ConvNet a = [Layer a]
-data Grad a = Grad a
+data Grad a = Grad a  -- Obsolete
 
 -- | A neural network may work differently in training and evaluation modes
 data Phase = Train | Eval deriving (Show, Eq)

@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 2b61e6b57dda2be3f4bfdd798fd0e52cabe32aa45e7232a5116f3c8e235667e9
+-- hash: c6a526bfca167ed3415b04f3fbb0400f22e0dda56be390b21249df9e3d9cc2c0
 
 name:           conv
 version:        0.0.0
@@ -30,8 +30,13 @@ library
     , array
     , backprop
     , base >=4.7 && <4.13
+    , deepseq
     , massiv >=0.4.3.0 && <0.5
+    , microlens
+    , microlens-th
     , mwc-random
+    , one-liner
+    , one-liner-instances
     , streamly
   default-language: Haskell2010
 
@@ -51,6 +56,8 @@ executable conv
     , deepseq
     , massiv >=0.4.3.0 && <0.5
     , massiv-io
+    , microlens
+    , microlens-th
     , mnist-idx
     , mwc-random
     , split
@@ -74,7 +81,10 @@ benchmark default
     , base >=4.7 && <4.13
     , conv
     , criterion
+    , deepseq
     , massiv >=0.4.3.0 && <0.5
+    , microlens
+    , microlens-th
     , mwc-random
     , streamly
   default-language: Haskell2010
