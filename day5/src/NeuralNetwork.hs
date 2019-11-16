@@ -143,7 +143,8 @@ lenet l = constVar
           ~> relu
           ~> maxpool
           -- Layer #2
-          ~> validConv2d (l ^^. conv2)
+          ~> sameConv2d (l ^^. conv2)
+          -- ~> validConv2d (l ^^. conv2)
           ~> relu
           ~> maxpool
 
@@ -174,11 +175,11 @@ type ConvNet = LeNet
 -- operations over parameters, e.g. in SDG implementation.
 -- Therefore, we define the Num instance.
 instance (Num a, Unbox a, Index ix) => Num (Array U ix a) where
-    x + y       = maybe (error "Dimension mismatch") compute (delay x .+. delay y)
-    x - y       = maybe (error "Dimension mismatch") compute (delay x .-. delay y)
-    x * y       = maybe (error "Dimension mismatch") compute (delay x .*. delay y)
+    x + y       = maybe (error $ "Dimension mismatch " ++ show (size x, size y)) compute (delay x .+. delay y)
+    x - y       = maybe (error $ "Dimension mismatch " ++ show (size x, size y)) compute (delay x .-. delay y)
+    x * y       = maybe (error $ "Dimension mismatch " ++ show (size x, size y)) compute (delay x .*. delay y)
+    negate x    = computeMap negate x
     -- Maybe define later, when we will actually need those
-    negate      = error "Please define negate"
     abs         = error "Please define abs"
     signum      = error "Please define signum"
     fromInteger = error "Please define me"
@@ -400,10 +401,25 @@ maxpool :: Reifies s W
         -> BVar s (Volume4 Float)
 maxpool = liftOp1. op1 $ \x ->
   let out = maxpool_ x
-      upsampled = undefined :: Volume4 Float  -- replicate elements from out
-      maxima = A.zipWith (\a b -> if a == b then 1 else 0) upsampled x
-  in (out, \dz -> maybe (error "Dimensions") compute (maxima .*. delay dz))
+      s = Stride (1 :> 1 :> 2 :. 2)
+      outUp = computeAs U $ upsample' s out
+      maxima = A.zipWith (\a b -> if a == b then 1 else 0) outUp x
+  in (out, \dz -> let dzUp = computeAs U $ upsample' s dz
+                  in maybe (error "Dimensions") compute (maxima .*. delay dzUp))
 
+-- Test maxpool gradients
+-- testC :: Volume4 Float
+-- testC =
+--   let a0 = A.fromLists' Par [[1,7],[3,4]] :: Matrix Float
+--       b = resize' (Sz4 1 1 2 2) a0
+--    in gradBP maxpool b
+-- Array U Par (Sz (1 :> 1 :> 2 :. 2))
+--   [ [ [ [ 0.0, 1.0 ]
+--       , [ 0.0, 0.0 ]
+--       ]
+--     ]
+--   ]
+--
 flatten :: Reifies s W
         => BVar s (Volume4 Float)
         -> BVar s (Matrix Float)
@@ -411,8 +427,6 @@ flatten = liftOp1. op1 $ \x ->
   let sz0@(Sz (bs :> ch :> h :. w)) = size x
       sz = Sz2 bs (ch * h * w)
    in (resize' sz x, \dz -> resize' sz0 dz)
-
-data Grad a = Grad a  -- Obsolete
 
 -- | A neural network may work differently in training and evaluation modes
 data Phase = Train | Eval deriving (Show, Eq)
@@ -488,11 +502,11 @@ crossEntropyLoss x targ n = _ce y
   where
     y = lenet n x :: BVar s (Matrix Float)
     _ce :: BVar s (Matrix Float) -> BVar s (Matrix Float)
-    -- Gradients only
-    _ce = liftOp1. op1 $ \pred_ ->
-      (undefined, \_ -> pred_ - targ)
-    -- _ce pred_ = pred_ - targ_
-    -- targ_ = constVar targ
+    -- -- Gradients only
+    -- _ce = liftOp1. op1 $ \pred_ ->
+    --   (undefined, \_ -> pred_ - targ)
+    _ce pred_ = pred_ - targ_
+    targ_ = constVar targ
 {-# INLINE crossEntropyLoss #-}
 
 -- | Broadcast a vector in Dim2
@@ -604,7 +618,7 @@ randNetwork :: IO (ConvNet Float)
 randNetwork = do
   _conv1 <- randConv2d (Sz4 3 1 5 5)
   _conv2 <- randConv2d (Sz4 3 3 5 5)
-  let [i, h1, h2, o] = [3 * 5 * 5, 120, 84, 10]
+  let [i, h1, h2, o] = [3 * 7 * 7, 120, 84, 10]
   _fc1 <- randLinear (Sz2 i h1)
   _fc2 <- randLinear (Sz2 h1 h2)
   _fc3 <- randLinear (Sz2 h2 o)
