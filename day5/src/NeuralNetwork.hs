@@ -533,13 +533,14 @@ crossEntropyLoss
   -> BVar s (Matrix Float)
 crossEntropyLoss x targ n = _ce y
   where
+    zeros = A.replicate Par (size targ) 0.0 :: Matrix Float
     y = lenet n x :: BVar s (Matrix Float)
     _ce :: BVar s (Matrix Float) -> BVar s (Matrix Float)
-    -- -- Gradients only
-    -- _ce = liftOp1. op1 $ \pred_ ->
-    --   (undefined, \_ -> pred_ - targ)
-    _ce pred_ = pred_ - targ_
-    targ_ = constVar targ
+    -- Gradients only
+    _ce = liftOp1. op1 $ \pred_ ->
+      (zeros  -- Lazy to implement for now
+      , \_ -> pred_ - targ  -- Gradients
+      )
 {-# INLINE crossEntropyLoss #-}
 
 -- | Broadcast a vector in Dim2
