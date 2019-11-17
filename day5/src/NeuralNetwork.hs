@@ -92,8 +92,8 @@ type Volume4 a = Array U Ix4 a
 
 -- | Learnable neural network parameters.
 -- Fully-connected layer weights.
-data Linear a = Linear { _w :: !(Matrix a)
-                       , _b :: !(Vector a)
+data Linear a = Linear { _weights :: !(Matrix a)
+                       , _biases :: !(Vector a)
                        }
   deriving (Show, Generic)
 
@@ -477,7 +477,7 @@ linearX' w dy = maybe (error "Inconsistent dimensions in linearX'") compute (dy 
 
 -- | Bias gradient
 bias' :: Matrix Float -> Vector Float
-bias' dY = compute $ m *. (_sumRows $ delay dY)
+bias' dY = compute $ m *. (sumRows_ $ delay dY)
   where
     m = recip $ fromIntegral $ rows dY
 
@@ -488,7 +488,7 @@ forward net dta = evalBP (flip lenet dta) net
 softmax_ :: Matrix Float -> Matrix Float
 softmax_ x =
   let x0 = expA (delay x)
-      x1 = computeAs U $ _sumCols x0  -- Note _sumCols, not _sumRows
+      x1 = computeAs U $ sumCols_ x0  -- Note sumCols_, not sumRows_
       x2 = x1 `colsLike` x
   in maybe (error  "Inconsistent dimensions in softmax_") compute (x0 ./. x2)
 
@@ -673,9 +673,9 @@ avgAccuracy net stream = s // len
     (//) = liftA2 (/)
 
 -- | Sum values in each column and produce a delayed 1D Array
-_sumRows :: Array D Ix2 Float -> Array D Ix1 Float
-_sumRows = A.foldlWithin Dim2 (+) 0.0
+sumRows_ :: Array D Ix2 Float -> Array D Ix1 Float
+sumRows_ = A.foldlWithin Dim2 (+) 0.0
 
 -- | Sum values in each row and produce a delayed 1D Array
-_sumCols :: Array D Ix2 Float -> Array D Ix1 Float
-_sumCols = A.foldlWithin Dim1 (+) 0.0
+sumCols_ :: Array D Ix2 Float -> Array D Ix1 Float
+sumCols_ = A.foldlWithin Dim1 (+) 0.0
