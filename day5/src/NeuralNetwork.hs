@@ -12,7 +12,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# OPTIONS_GHC -fno-warn-partial-type-signatures #-}
 
@@ -317,6 +316,7 @@ _deconv2d (Padding (Sz szp1) (Sz szp2) pb) w x = res
     base = computeAs U $ applyStencil pad4 (sten 0) x'
     res = foldl' (\prev ch -> let conv = computeAs U $ applyStencil pad4 (sten ch) x'
                               in computeAs U $ append' 4 prev conv) base [1..cout - 1]
+{-# INLINE _deconv2d #-}
 
 rot180 :: Index ix => Array U ix Float -> Array D ix Float
 rot180 = reverse' 1. reverse' 2
