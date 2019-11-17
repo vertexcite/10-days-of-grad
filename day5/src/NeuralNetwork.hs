@@ -50,6 +50,8 @@ module NeuralNetwork
   -- * Helpers
   , rows
   , cols
+  , sumRows
+  , sumCols
   , computeMap
   , randLinear
   , randConv2d
@@ -317,8 +319,6 @@ linear = liftOp2. op2 $ \(Linear w b) x ->
                       dX = linearX' w dZ
                   in (Linear dW dB, dX)
      )
-
--- TODO: differentiable (|*|), (.+.), and (-) analogs
 
 relu_ :: (Index ix, Unbox e, Ord e, Num e) => Array U ix e -> Array U ix e
 relu_ = computeMap (max 0)
@@ -676,6 +676,20 @@ avgAccuracy net stream = s // len
 sumRows_ :: Source r Ix2 Float => Array r Ix2 Float -> Array D Ix1 Float
 sumRows_ = A.foldlWithin Dim2 (+) 0.0
 
+sumRows :: Reifies s W
+    => BVar s (Matrix Float)
+    -> BVar s (Vector Float)
+sumRows = liftOp1. op1 $ \x ->
+  (compute $ sumRows_ x, \dY -> compute $ dY `rowsLike` x)
+
 -- | Sum values in each row and produce a delayed 1D Array
 sumCols_ :: Source r Ix2 Float => Array r Ix2 Float -> Array D Ix1 Float
 sumCols_ = A.foldlWithin Dim1 (+) 0.0
+
+sumCols :: Reifies s W
+    => BVar s (Matrix Float)
+    -> BVar s (Vector Float)
+sumCols = liftOp1. op1 $ \x ->
+  (compute $ sumCols_ x, \dY -> compute $ dY `colsLike` x)
+
+-- TODO: a module with differentiable expA, (|*|), (.*.), (./.), (.+.), and (.-.)
