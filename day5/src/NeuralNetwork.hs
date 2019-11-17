@@ -477,7 +477,7 @@ linearX' w dy = maybe (error "Inconsistent dimensions in linearX'") compute (dy 
 
 -- | Bias gradient
 bias' :: Matrix Float -> Vector Float
-bias' dY = compute $ m *. (sumRows_ $ delay dY)
+bias' dY = compute $ m *. (sumRows_ dY)
   where
     m = recip $ fromIntegral $ rows dY
 
@@ -673,9 +673,9 @@ avgAccuracy net stream = s // len
     (//) = liftA2 (/)
 
 -- | Sum values in each column and produce a delayed 1D Array
-sumRows_ :: Array D Ix2 Float -> Array D Ix1 Float
+sumRows_ :: Source r Ix2 Float => Array r Ix2 Float -> Array D Ix1 Float
 sumRows_ = A.foldlWithin Dim2 (+) 0.0
 
 -- | Sum values in each row and produce a delayed 1D Array
-sumCols_ :: Array D Ix2 Float -> Array D Ix1 Float
+sumCols_ :: Source r Ix2 Float => Array r Ix2 Float -> Array D Ix1 Float
 sumCols_ = A.foldlWithin Dim1 (+) 0.0
