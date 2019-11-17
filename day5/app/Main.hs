@@ -99,7 +99,7 @@ train TrainSettings { _printEpochs = printEpochs
 
 main :: IO ()
 main = do
-  trainS <- mnistStream 1000 "data/train-images-idx3-ubyte" "data/train-labels-idx1-ubyte"
+  trainS <- mnistStream 100 "data/train-images-idx3-ubyte" "data/train-labels-idx1-ubyte"
   testS <- mnistStream 1000 "data/t10k-images-idx3-ubyte" "data/t10k-labels-idx1-ubyte"
 
   net <- randNetwork
@@ -114,12 +114,15 @@ main = do
 {-
 testGrad =
   let im' = resize' (Sz4 1 1 28 28) im
+      im2 = (compute $ append' 4 im' im') :: Volume4 Float
       d0 = A.replicate Par (Sz2 1 3) 1.0 :: Matrix Float
       d1 = computeAs U $ expandWithin Dim1 28 (\e j -> (fromIntegral j + 0.5) + e) d0 :: Volume Float
       d = computeAs U $ expandWithin Dim2 28 (\e j -> (fromIntegral j + 0.25) * 3 + e) d1 :: Volume4 Float
+      d2 = (compute $ append' 4 d d) :: Volume4 Float
       a' = conv2d' (Padding (Sz2 2 2) (Sz2 2 2) (Fill 0.0)) w0 d
-      w' = conv2d'' (Padding (Sz2 2 2) (Sz2 2 2) (Fill 0.0)) im' d
-  in (a', w', d)
+
+      w' = conv2d'' (Padding (Sz2 2 2) (Sz2 2 2) (Fill 0.0)) im2 d2
+  in (a', w', size d2, size im2)
 
 writeImageY :: FilePath -> Matrix Float -> IO ()
 writeImageY f a = do

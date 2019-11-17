@@ -244,15 +244,16 @@ instance (Num a, Unbox a) => Backprop (ConvNet a)
 -- in a straightforward manner with `computeWithStride`.
 -- Do not forget to use strides 1 in batch and channel dimensions (Dim4, Dim3).
 conv2d_
-       :: Padding Ix2 Float  -- ^ Image plane padding
-       -> Volume4 Float  -- ^ Weights
-       -> Volume4 Float  -- ^ Batch of input features
+       :: Padding Ix2 Float  -- ^ Image plane padding (p1 :. p2) (q1 :. q2)
+       -> Volume4 Float  -- ^ Weights (cout :> cin :> w1 :> w2)
+       -> Volume4 Float  -- ^ Batch of input features (bs :> cin :> x1 :. x2)
        -> Volume4 Float  -- ^ Output features
-conv2d_ (Padding (Sz szp1) (Sz szp2) be) w x = compute res
+                         -- (bs :> cout :> x1 - w1 + p1 + q1 + 1 :> x2 - w2 + p2 + q2 + 1)
+conv2d_ (Padding (Sz szp1) (Sz szp2) be) w x = res
   where
-    (Sz (cout :> cin :> x1 :. x2)) = size w
+    (Sz (cout :> cin :> w1 :. w2)) = size w
     -- Extract weights, add fake Dim4, and make stencil
-    sten = makeCorrelationStencilFromKernel. resize' (Sz4 1 cin x1 x2). (w !>)
+    sten = makeCorrelationStencilFromKernel. resize' (Sz4 1 cin w1 w2). (w !>)
     {-# INLINE sten #-}
     -- Add zeroes in batch and channel dimensions
     pad4 = Padding (Sz (0 :> 0 :> szp1)) (Sz (0 :> 0 :> szp2)) be
@@ -281,9 +282,41 @@ conv2d' p w dz = res
 -- \[ dW = X * \delta \]
 conv2d''
   :: Padding Ix2 Float -> Volume4 Float -> Volume4 Float -> Volume4 Float
-conv2d'' p x dz = conv2d_ p d x
+conv2d'' p x dz = computeMap (/fromIntegral bs) res
   where
-    d = computeAs U $ transposeInner dz
+    -- Assume bs1 == bs2
+    Sz (bs :> _) = size x
+    -- (sum. zipWith) in 5D
+    dzd = delay dz
+    xd = delay x
+    base = _deconv2d p (compute $ dzd !> 0) (compute $ xd !> 0)
+    -- Accumulate gradients over the batch
+    res = foldl' (\acc ch ->
+      let cur = _deconv2d p (compute $ dzd !> ch) (compute $ xd !> ch)
+       in acc + cur) base [1..bs-1]
+
+-- | Cartesian product (sort of)
+--
+-- pad
+-- -> (cout :> w1 :. w2)
+-- -> (cin :> e1 :. e2)
+-- -> (cout :> cin :> e1 - w1 + p1' :. e2 - w2 + p2')
+_deconv2d
+  :: Padding Ix2 Float
+  -> Volume Float
+  -> Volume Float
+  -> Volume4 Float
+_deconv2d (Padding (Sz szp1) (Sz szp2) pb) w x = res
+  where
+    (Sz (cout :> w1 :. w2)) = size w
+    (Sz (cin :> e1 :. e2)) = size x
+    sten = makeCorrelationStencilFromKernel. resize' (Sz4 1 1 w1 w2). (w !>)
+    {-# INLINE sten #-}
+    pad4 = Padding (Sz (0 :> 0 :> szp1)) (Sz (0 :> 0 :> szp2)) pb
+    x' = resize' (Sz4 1 cin e1 e2) x
+    base = computeAs U $ applyStencil pad4 (sten 0) x'
+    res = foldl' (\prev ch -> let conv = computeAs U $ applyStencil pad4 (sten ch) x'
+                              in computeAs U $ append' 4 prev conv) base [1..cout - 1]
 
 rot180 :: Index ix => Array U ix Float -> Array D ix Float
 rot180 = reverse' 1. reverse' 2
