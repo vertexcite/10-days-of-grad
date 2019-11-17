@@ -64,7 +64,7 @@ module NeuralNetwork
 
 import           Control.Applicative ( liftA2 )
 import           Control.DeepSeq ( NFData )
-import           Control.Monad ( replicateM, foldM )
+import           Control.Monad ( foldM )
 import           Data.List ( foldl', maximumBy )
 import           Data.Massiv.Array hiding ( map, zip, zipWith, flatten )
 import qualified Data.Massiv.Array as A
@@ -104,10 +104,10 @@ data Conv2d a = Conv2d { _kernels :: !(Volume4 a) }
   deriving (Show, Generic)
 
 instance NFData (Linear a)
-makeLenses ''Linear
+-- makeLenses ''Linear
 
 instance NFData (Conv2d a)
-makeLenses ''Conv2d
+-- makeLenses ''Conv2d
 
 data LeNet a =
     LeNet { _conv1 :: !(Conv2d a)
