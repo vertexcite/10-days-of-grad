@@ -278,10 +278,11 @@ conv2d' p w dz = res
 
 -- | Kernel gradients
 --
--- \[ dW = X * \delta \]
+-- \[ dW = X (*) delta \]
 conv2d''
   :: Padding Ix2 Float -> Volume4 Float -> Volume4 Float -> Volume4 Float
-conv2d'' p x dz = computeMap (/fromIntegral bs) res
+-- Iterate over images in a batch
+conv2d'' p x dz = res  -- computeMap (/fromIntegral bs) res
   where
     -- Assume bs1 == bs2
     Sz (bs :> _) = size x
@@ -290,32 +291,36 @@ conv2d'' p x dz = computeMap (/fromIntegral bs) res
     xd = delay x
     base = _deconv2d p (compute $ dzd !> 0) (compute $ xd !> 0)
     -- Accumulate gradients over the batch
-    res = foldl' (\acc ch ->
-      let cur = _deconv2d p (compute $ dzd !> ch) (compute $ xd !> ch)
+    res = foldl' (\acc im ->
+      let cur = _deconv2d p (compute $ dzd !> im) (compute $ xd !> im)
        in acc + cur) base [1..bs-1]
 
--- | Cartesian product (sort of)
---
--- pad
--- -> (cout :> w1 :. w2)
--- -> (cin :> e1 :. e2)
--- -> (cout :> cin :> e1 - w1 + p1' :. e2 - w2 + p2')
-_deconv2d
-  :: Padding Ix2 Float
-  -> Volume Float
-  -> Volume Float
-  -> Volume4 Float
-_deconv2d (Padding (Sz szp1) (Sz szp2) pb) w x = res
+-- Iterate over out channels, i.e. dW has the same outer dimension as dZ (after
+-- image indexing)
+_deconv2d :: Padding Ix2 Float
+          -> Volume Float
+          -> Volume Float
+          -> Volume4 Float
+_deconv2d (Padding (Sz szp1) (Sz szp2) pb) dz x = res
   where
-    (Sz (cout :> w1 :. w2)) = size w
-    (Sz (cin :> e1 :. e2)) = size x
-    sten = makeCorrelationStencilFromKernel. resize' (Sz4 1 1 w1 w2). (w !>)
+    (Sz (cout :> dz1 :. dz2)) = size dz
+    (Sz (cin :> _ :. _)) = size x
+    sten i =
+      let kernel2d = dz !> i
+          kernel3d = computeAs U $ resize' (Sz3 1 dz1 dz2) kernel2d :: Volume Float
+       in makeCorrelationStencilFromKernel kernel3d
     {-# INLINE sten #-}
-    pad4 = Padding (Sz (0 :> 0 :> szp1)) (Sz (0 :> 0 :> szp2)) pb
-    x' = resize' (Sz4 1 cin e1 e2) x
-    base = computeAs U $ applyStencil pad4 (sten 0) x'
-    res = foldl' (\prev ch -> let conv = computeAs U $ applyStencil pad4 (sten ch) x'
+    pad3 = Padding (Sz (0 :> szp1)) (Sz (0 :> szp2)) pb
+    base0 = applyStencil pad3 (sten 0) x
+
+    Sz szW0 = size base0
+    szW = (Sz (1 :> szW0))
+    rsz = resize' szW. computeAs U
+
+    base = rsz base0
+    res = foldl' (\prev ch -> let conv = rsz. applyStencil pad3 (sten ch) $ x
                               in computeAs U $ append' 4 prev conv) base [1..cout - 1]
+                              -- in computeAs U $ append' 4 conv prev) base [1..cout - 1]
 {-# INLINE _deconv2d #-}
 
 rot180 :: Index ix => Array U ix Float -> Array D ix Float
