@@ -99,13 +99,13 @@ train TrainSettings { _printEpochs = printEpochs
 
 main :: IO ()
 main = do
-  trainS <- mnistStream 100 "data/train-images-idx3-ubyte" "data/train-labels-idx1-ubyte"
+  trainS <- mnistStream 64 "data/train-images-idx3-ubyte" "data/train-labels-idx1-ubyte"
   testS <- mnistStream 1000 "data/t10k-images-idx3-ubyte" "data/t10k-labels-idx1-ubyte"
 
   net <- randNetwork
 
   net' <- train TrainSettings { _printEpochs = 1
-                              , _lr = 0.1
+                              , _lr = 0.01
                               , _totalEpochs = 10
                               } net (trainS, testS)
 
