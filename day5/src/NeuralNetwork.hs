@@ -542,9 +542,9 @@ crossEntropyLoss x targ n = _ce y
     y = lenet n x :: BVar s (Matrix Float)
     _ce :: BVar s (Matrix Float) -> BVar s (Matrix Float)
     -- Gradients only
-    _ce = liftOp1. op1 $ \pred_ ->
+    _ce = liftOp1. op1 $ \y_ ->
       (zeros  -- Lazy to implement for now
-      , \_ -> pred_ - targ  -- Gradients
+      , \_ -> (softmax_ y_) - targ  -- Gradients
       )
 {-# INLINE crossEntropyLoss #-}
 
