@@ -214,3 +214,20 @@ main = putStrLn "Test 1D convolutions" >> testConv1D
 --   , [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
 --   , [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
 --   ]
+
+zipWithB ::
+     Unbox e
+  => (Array M Ix1 e -> Array M Ix1 e -> e)
+  -> Array U Ix2 e
+  -> Array U Ix2 e
+  -> Array D Ix1 e
+zipWithB f a1 a2 = (\i -> f (a1 !> i) (a2 !> i)) <$> (Ix1 0 ..: k)
+  where (Sz2 _ k) = size a1
+
+-- λ> let dot x y = sum $ zipWith (*) x y
+-- λ> :set -XOverloadedLists
+-- λ> let b = [[1,2],[-3,2]] :: Array U Ix2 Int
+-- λ> let a = [[1,2],[3,4]] :: Array U Ix2 Int
+-- λ> zipWithB dot a b
+-- Array D Seq (Sz1 2)
+--   [ 5, -1 ]
