@@ -16,12 +16,14 @@
 {-# OPTIONS_GHC -fno-warn-partial-type-signatures #-}
 
 module NeuralNetwork
-  ( LeNet
+  ( BNN
   , Vector
   , Matrix
   , Volume
   , Volume4
   , sigmoid
+  , sign
+  , sign_
   , relu
   , relu_
   , conv2d
@@ -34,7 +36,7 @@ module NeuralNetwork
   , flatten
   , linear
   , forward
-  , lenet
+  , binaryNet
   , noPad2
   , (~>)
 
@@ -96,6 +98,14 @@ data Linear a = Linear { _weights :: !(Matrix a)
                        }
   deriving (Show, Generic)
 
+newtype LinearB a = LinearB { _weights' :: Matrix a }
+  deriving (Show, Generic)
+
+data BatchNorm1d a = BatchNorm1d { _gamma :: Vector a  -- TODO: add running mean and variance
+                                 , _beta :: Vector a
+                                 }
+  deriving (Show, Generic)
+
 -- | Convolutional layer weights. We omit biases for simplicity.
 newtype Conv2d a = Conv2d { _kernels :: Volume4 a }
   deriving (Show, Generic)
@@ -106,16 +116,17 @@ instance NFData (Linear a)
 instance NFData (Conv2d a)
 -- makeLenses ''Conv2d
 
-data LeNet a =
-    LeNet { _conv1 :: !(Conv2d a)
-          , _conv2 :: !(Conv2d a)
-          , _fc1 :: !(Linear a)
-          , _fc2 :: !(Linear a)
-          , _fc3 :: !(Linear a)
-          }
+data BNN a =
+    BNN { _fc1 :: !(LinearB a)
+        , _bn1 :: !(BatchNorm1d a)
+        , _fc2 :: !(LinearB a)
+        , _bn2 :: !(BatchNorm1d a)
+        , _fc3 :: !(LinearB a)
+        , _bn3 :: !(BatchNorm1d a)
+        }
   deriving (Show, Generic)
 
-makeLenses ''LeNet
+makeLenses ''BNN
 
 sameConv2d :: Reifies s W
     => BVar s (Conv2d Float)
@@ -129,35 +140,31 @@ validConv2d :: Reifies s W
     -> BVar s (Volume4 Float)
 validConv2d = conv2d noPad2
 
-lenet
+-- Inputs are NOT binary. Binary weights
+linear' = undefined
+
+-- Both inputs and weights are binary
+linearB = undefined
+
+binaryNet
     :: (Reifies s W)
-    => BVar s (LeNet Float)
+    => BVar s (BNN Float)
     -> Volume4 Float  -- ^ Batch of MNIST images
     -> BVar s (Matrix Float)
-lenet l = constVar
-
-          -- Feature extractor
-          -- Layer (layer group) #1
-          ~> sameConv2d (l ^^. conv1)
-          ~> relu
-          ~> maxpool
-          -- Layer #2
-          ~> validConv2d (l ^^. conv2)
-          ~> relu
-          ~> maxpool
-
-          ~> flatten
-
-          -- Classifier
-          -- Layer #3
-          ~> linear (l ^^. fc1)
-          ~> relu
-          -- Layer #4
-          ~> linear (l ^^. fc2)
-          ~> relu
-          -- Layer #5
-          ~> linear (l ^^. fc3)
-{-# INLINE lenet #-}
+binaryNet l = undefined
+-- binaryNet l = constVar
+--             ~> flatten
+--
+--             -- Classifier
+--             -- Layer #3
+--             ~> linear' (l ^^. fc1)
+--             ~> sign
+--             -- Layer #4
+--             ~> linearB (l ^^. fc2)
+--             ~> sign
+--             -- Layer #5
+--             ~> linearB (l ^^. fc3)
+{-# INLINE binaryNet #-}
 
 infixl 9 ~>
 (~>) :: (a -> b) -> (b -> c) -> a -> c
@@ -167,7 +174,7 @@ f ~> g = g. f
 noPad2 :: Padding Ix2 Float
 noPad2 = Padding (Sz2 0 0) (Sz2 0 0) (Fill 0.0)
 
-type ConvNet = LeNet
+type Net = BNN
 
 -- We would like to be able to perform arithmetic
 -- operations over parameters, e.g. in SDG implementation.
@@ -200,9 +207,27 @@ instance (Num a, Unbox a) => Num (Linear a) where
     signum      = gSignum
     fromInteger = gFromInteger
 
+instance (Num a, Unbox a) => Num (LinearB a) where
+    (+)         = gPlus
+    (-)         = gMinus
+    (*)         = gTimes
+    negate      = gNegate
+    abs         = gAbs
+    signum      = gSignum
+    fromInteger = gFromInteger
+
+instance (Num a, Unbox a) => Num (BatchNorm1d a) where
+    (+)         = gPlus
+    (-)         = gMinus
+    (*)         = gTimes
+    negate      = gNegate
+    abs         = gAbs
+    signum      = gSignum
+    fromInteger = gFromInteger
+
 instance ( Unbox a
          , Num a
-         ) => Num (ConvNet a) where
+         ) => Num (Net a) where
     (+)         = gPlus
     (-)         = gMinus
     (*)         = gTimes
@@ -223,14 +248,16 @@ instance ( Unbox a
 --
 -- instance ( Num a
 --          , Unbox a
---          ) => Fractional (ConvNet a) where
+--          ) => Fractional (Net a) where
 --     (/)          = gDivide
 --     recip        = gRecip
 --     fromRational = gFromRational
 
 instance (Num a, Unbox a) => Backprop (Conv2d a)
 instance (Num a, Unbox a) => Backprop (Linear a)
-instance (Num a, Unbox a) => Backprop (ConvNet a)
+instance (Num a, Unbox a) => Backprop (LinearB a)
+instance (Num a, Unbox a) => Backprop (BatchNorm1d a)
+instance (Num a, Unbox a) => Backprop (Net a)
 
 -- | 2D convolution that operates on a batch.
 --
@@ -359,6 +386,10 @@ linear = liftOp2. op2 $ \(Linear w b) x ->
                       dX = linearX' w dZ
                   in (Linear dW dB, dX)
      )
+
+sign_ = undefined
+
+sign = undefined
 
 relu_ :: (Index ix, Unbox e, Ord e, Num e) => Array U ix e -> Array U ix e
 relu_ = computeMap (max 0)
@@ -522,8 +553,8 @@ bias' dY = compute $ m *. sumRows_ dY
     m = recip $ fromIntegral $ rows dY
 
 -- | Forward pass in a neural network (inference)
-forward :: ConvNet Float -> Volume4 Float -> Matrix Float
-forward net dta = evalBP (`lenet` dta) net
+forward :: Net Float -> Volume4 Float -> Matrix Float
+forward net dta = evalBP (`binaryNet` dta) net
 
 softmax_ :: Matrix Float -> Matrix Float
 softmax_ x =
@@ -536,12 +567,12 @@ crossEntropyLoss
   :: forall s. (Reifies s W)
   => Volume4 Float
   -> Matrix Float
-  -> BVar s (ConvNet Float)
+  -> BVar s (Net Float)
   -> BVar s (Matrix Float)
 crossEntropyLoss x targ n = _ce y
   where
     zeros = A.replicate Par (size targ) 0.0 :: Matrix Float
-    y = lenet n x :: BVar s (Matrix Float)
+    y = binaryNet n x :: BVar s (Matrix Float)
     _ce :: BVar s (Matrix Float) -> BVar s (Matrix Float)
     -- Gradients only
     _ce = liftOp1. op1 $ \y_ ->
@@ -576,11 +607,11 @@ sgd :: Monad m
   -- ^ Learning rate
   -> Int
   -- ^ No of iterations
-  -> ConvNet Float
+  -> Net Float
   -- ^ Neural network
   -> SerialT m (Volume4 Float, Matrix Float)
   -- ^ Data stream
-  -> m (ConvNet Float)
+  -> m (Net Float)
 sgd lr n net0 dataStream = iterN n epochStep net0
   where
     -- Iterate over all batches
@@ -594,8 +625,8 @@ trainStep
   :: Float  -- ^ Learning rate
   -> Volume4 Float  -- ^ Images batch
   -> Matrix Float  -- ^ Targets
-  -> ConvNet Float  -- ^ Initial network
-  -> ConvNet Float
+  -> Net Float  -- ^ Initial network
+  -> Net Float
 trainStep lr !x !targ !n = n - computeMap' (lr *) (gradBP (crossEntropyLoss x targ) n)
 {-# INLINE trainStep #-}
 
@@ -605,18 +636,20 @@ trainStep lr !x !targ !n = n - computeMap' (lr *) (gradBP (crossEntropyLoss x ta
 -- Conv2d a i o k, i = in channels, o = out channels, k = square kernel size
 -- and Linear a i o, i = inputs, o = outputs.
 -- trainStep lr !x !targ !n = n - realToFrac lr * gradBP (loss x targ) n
-computeMap' :: (Float -> Float) -> LeNet Float -> LeNet Float
-computeMap' f LeNet { _conv1 = Conv2d k1
-                    , _conv2 = Conv2d k2
-                    , _fc1 = Linear w1 b1
-                    , _fc2 = Linear w2 b2
-                    , _fc3 = Linear w3 b3
-                    } = LeNet { _conv1 = Conv2d (computeMap f k1)
-                               , _conv2 = Conv2d (computeMap f k2)
-                               , _fc1 = Linear (computeMap f w1) (computeMap f b1)
-                               , _fc2 = Linear (computeMap f w2) (computeMap f b2)
-                               , _fc3 = Linear (computeMap f w3) (computeMap f b3)
-                               }
+computeMap' :: (Float -> Float) -> BNN Float -> BNN Float
+computeMap' f BNN { _fc1 = LinearB w1
+                  , _bn1 = BatchNorm1d gamma1 beta1
+                  , _fc2 = LinearB w2
+                  , _bn2 = BatchNorm1d gamma2 beta2
+                  , _fc3 = LinearB w3
+                  , _bn3 = BatchNorm1d gamma3 beta3
+                  } = BNN { _fc1 = LinearB (computeMap f w1)
+                          , _bn1 = BatchNorm1d (computeMap f gamma1) (computeMap f beta1)
+                          , _fc2 = LinearB (computeMap f w2)
+                          , _bn2 = BatchNorm1d (computeMap f gamma2) (computeMap f beta2)
+                          , _fc3 = LinearB (computeMap f w3)
+                          , _bn3 = BatchNorm1d (computeMap f gamma3) (computeMap f beta3)
+                          }
 
 -- | Strict left fold
 iterN :: Monad m => Int -> (a -> m a) -> a -> m a
@@ -645,24 +678,22 @@ randConv2d sz = do
   k <- setComp Par <$> _genWeights sz
   return (Conv2d k)
 
-randNetwork :: IO (ConvNet Float)
+randLinearB = undefined
+
+randNetwork :: IO (BNN Float)
 randNetwork = do
-  -- Generate a new conv layer weights:
-  -- 6 out channels, 1 input channel, kernel size: 5 x 5
-  _conv1 <- randConv2d (Sz4 6 1 5 5)
-  -- 16 out channels, 6 input channels, kernel size: 5 x 5
-  _conv2 <- randConv2d (Sz4 16 6 5 5)
-  let [i, h1, h2, o] = [16 * 5 * 5, 120, 84, 10]
-  _fc1 <- randLinear (Sz2 i h1)
-  _fc2 <- randLinear (Sz2 h1 h2)
-  _fc3 <- randLinear (Sz2 h2 o)
+  let [i, h1, h2, o] = [784, 1200, 400, 10]
+  _fc1 <- randLinearB (Sz2 i h1)
+  _fc2 <- randLinearB (Sz2 h1 h2)
+  _fc3 <- randLinearB (Sz2 h2 o)
   return $
-    LeNet { _conv1 = _conv1
-          , _conv2 = _conv2
-          , _fc1 = _fc1
-          , _fc2 = _fc2
-          , _fc3 = _fc3
-          }
+    BNN { _fc1 = _fc1
+        , _bn1 = undefined
+        , _fc2 = _fc2
+        , _bn2 = undefined
+        , _fc3 = _fc3
+        , _bn3 = undefined
+        }
 
 maxIndex :: (Ord a, Num b, Enum b) => [a] -> b
 maxIndex xs = snd $ maximumBy (comparing fst) (zip xs [0..])
@@ -685,7 +716,7 @@ accuracy tgt pr = 100 * r
     r = 1 - fromIntegral errNo / fromIntegral (length tgt)
 {-# SPECIALIZE accuracy :: [Int] -> [Int] -> Float #-}
 
-_accuracy :: ConvNet Float
+_accuracy :: Net Float
   -> (Volume4 Float, Matrix Float)
   -> Float
 -- NB: better avoid double conversion to and from one-hot-encoding
@@ -696,7 +727,7 @@ _accuracy net (batch, labelsOneHot) =
 
 avgAccuracy
   :: Monad m
-  => ConvNet Float
+  => Net Float
   -> SerialT m (Volume4 Float, Matrix Float)
   -> m Float
 avgAccuracy net stream = s // len
