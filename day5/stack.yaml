@@ -1,5 +1,8 @@
 # For more information, see: https://github.com/commercialhaskell/stack/blob/release/doc/yaml_configuration.md
 # vim: nospell
+nix:
+  enable: true
+  packages: [gmp, zlib]
 
 resolver: lts-14.4
 
